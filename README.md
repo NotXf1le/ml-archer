@@ -62,18 +62,21 @@ The report order and evidence fields are defined in
 When you want a live review instead of the shipped demo:
 
 1. Run `python scripts/doctor.py`.
-2. If `proofs/` is missing, run `python scripts/bootstrap_proofs.py`.
-3. Search candidate theorems with `python scripts/search_mathlib.py "<query>"`.
-4. Verify `proofs/ProofScratch.lean` with `python scripts/lean_check.py`.
-5. Write `report.md` and `evidence.json`.
-6. Validate the bundle with `python scripts/validate_artifact_bundle.py --bundle-dir <dir>`.
+2. If this repo needs its own Lean project, run `python scripts/bootstrap_proofs.py --scope local`.
+3. Otherwise run `python scripts/bootstrap_proofs.py` and let it create or reuse the shared user-scoped proofs workspace under `$CODEX_HOME/cache/mathlib-ml-arch/shared_workspace`.
+4. Search candidate theorems with `python scripts/search_mathlib.py "<query>"`.
+5. Verify `proofs/ProofScratch.lean` with `python scripts/lean_check.py`.
+6. Both search and verification prefer a repo-local `proofs/` project when one exists and otherwise fall back to the shared workspace automatically.
+7. Write `report.md` and `evidence.json`.
+8. Validate the bundle with `python scripts/validate_artifact_bundle.py --bundle-dir <dir>`.
 
 When `lake env lean` is unavailable but compiled package libraries exist,
 `lean_check.py` falls back to direct `lean` with discovered `LEAN_PATH` and
 records that verification method explicitly.
 
-If `proofs/` is missing, the correct output is that local formal verification is
-unavailable in this workspace. Do not blame theorem search for that case.
+If neither a repo-local `proofs/` project nor the shared user-scoped proofs
+workspace exists, the correct output is that formal verification is unavailable
+until bootstrap is run. Do not blame theorem search for that case.
 
 ## Hooks
 

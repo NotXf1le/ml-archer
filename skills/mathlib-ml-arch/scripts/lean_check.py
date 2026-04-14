@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,19 +12,34 @@ from common import (
     build_lean_path,
     configure_stdout,
     discover_package_lib_dirs,
-    find_existing_proofs_root,
     git_safe_directories_for_proofs,
     find_lake,
     find_lean,
+    requested_workspace_root,
+    resolve_proofs_workspace,
+    shared_workspace_root,
     subprocess_env_for_tool,
 )
 
 
-def missing_proofs_message() -> str:
+def missing_proofs_message(scope: str) -> str:
+    shared_root = shared_workspace_root()
+    if scope == "shared":
+        return (
+            "No shared Lean proofs project was found. Expected a `proofs/` directory under "
+            f"{shared_root}. Run bootstrap_proofs.py --scope shared first."
+        )
+    if scope == "local":
+        return (
+            "No repo-local Lean proofs project was found. Expected a `proofs/` directory in the current "
+            "workspace or one of its parent directories. Run bootstrap_proofs.py --scope local first or "
+            "create `proofs/lean-toolchain`, `proofs/lakefile.toml`, and `proofs/ProofScratch.lean`."
+        )
+
     return (
-        "No local Lean proofs project was found. Expected a `proofs/` directory in the current "
-        "workspace or one of its parent directories. Run bootstrap_proofs.py first or create "
-        "`proofs/lean-toolchain`, `proofs/lakefile.toml`, and `proofs/ProofScratch.lean` "
+        "No Lean proofs project was found. Checked the current workspace, its parent directories, "
+        f"and the shared CODEX_HOME cache at {shared_root}. Run bootstrap_proofs.py first or "
+        "create `proofs/lean-toolchain`, `proofs/lakefile.toml`, and `proofs/ProofScratch.lean` "
         "before retrying."
     )
 
@@ -37,6 +53,12 @@ def parse_args() -> argparse.Namespace:
         help="Workspace root or child directory to search from. Defaults to the current directory.",
     )
     parser.add_argument(
+        "--scope",
+        choices=["auto", "local", "shared"],
+        default="auto",
+        help="Which proofs workspace to verify. `auto` prefers a repo-local proofs/ project and otherwise uses the shared CODEX_HOME cache.",
+    )
+    parser.add_argument(
         "--file",
         default="ProofScratch.lean",
         help="Lean file inside proofs/ to typecheck.",
@@ -48,6 +70,12 @@ def parse_args() -> argparse.Namespace:
         help="Verification mode. `auto` tries `lake env lean` first, then falls back to direct lean.",
     )
     parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=120,
+        help="Per-command timeout for `lake env lean` and direct `lean` invocations.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit machine-readable JSON diagnostics.",
@@ -55,24 +83,48 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run_command(command: list[str], cwd: Path, env: dict[str, str]) -> dict[str, object]:
-    result = subprocess.run(
-        command,
-        cwd=cwd,
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    return {
-        "command": command,
-        "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-        "success": result.returncode == 0,
-    }
+def _coerce_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def run_command(command: list[str], cwd: Path, env: dict[str, str], timeout_seconds: int) -> dict[str, object]:
+    try:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+        )
+        return {
+            "command": command,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "success": result.returncode == 0,
+            "timed_out": False,
+            "timeout_seconds": timeout_seconds,
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "command": command,
+            "returncode": None,
+            "stdout": _coerce_text(exc.stdout),
+            "stderr": (
+                f"{_coerce_text(exc.stderr).rstrip()}\nCommand timed out after {timeout_seconds} seconds."
+            ).strip(),
+            "success": False,
+            "timed_out": True,
+            "timeout_seconds": timeout_seconds,
+        }
 
 
 def print_human_summary(payload: dict[str, object]) -> None:
@@ -82,7 +134,8 @@ def print_human_summary(payload: dict[str, object]) -> None:
     else:
         print(f"Verification failed for {payload['target']}.", file=sys.stderr)
 
-    print(f"workspace: {payload['workspace_root']}")
+    print(f"requested workspace: {payload['requested_workspace']}")
+    print(f"selected workspace: {payload['workspace_root']} ({payload['selected_scope'] or 'none'})")
     print(f"proofs: {payload['proofs_dir']}")
     print(f"lake: {payload.get('lake_path') or 'not found'}")
     print(f"lean: {payload.get('lean_path') or 'not found'}")
@@ -100,17 +153,21 @@ def print_human_summary(payload: dict[str, object]) -> None:
 def main() -> int:
     configure_stdout()
     args = parse_args()
-    root = find_existing_proofs_root(args.workspace)
+    requested_workspace = requested_workspace_root(args.workspace)
+    root, selected_scope = resolve_proofs_workspace(requested_workspace, args.scope)
     if root is None:
         payload = {
             "success": False,
-            "error": missing_proofs_message(),
-            "workspace_root": str(Path(args.workspace).resolve()) if args.workspace else str(Path.cwd().resolve()),
+            "error": missing_proofs_message(args.scope),
+            "requested_workspace": str(requested_workspace),
+            "workspace_root": str(requested_workspace),
+            "selected_scope": None,
+            "shared_workspace_root": str(shared_workspace_root()),
         }
         if args.json:
             print(json.dumps(payload, indent=2, ensure_ascii=False))
         else:
-            print(missing_proofs_message(), file=sys.stderr)
+            print(missing_proofs_message(args.scope), file=sys.stderr)
         return 4
 
     proofs_dir = root / "proofs"
@@ -123,7 +180,9 @@ def main() -> int:
         payload = {
             "success": False,
             "error": f"Lean target not found: {target}",
+            "requested_workspace": str(requested_workspace),
             "workspace_root": str(root),
+            "selected_scope": selected_scope,
             "proofs_dir": str(proofs_dir),
             "target": str(target),
         }
@@ -140,7 +199,9 @@ def main() -> int:
 
     payload: dict[str, object] = {
         "success": False,
+        "requested_workspace": str(requested_workspace),
         "workspace_root": str(root),
+        "selected_scope": selected_scope,
         "proofs_dir": str(proofs_dir),
         "target": str(target),
         "lake_path": str(lake) if lake else None,
@@ -158,6 +219,7 @@ def main() -> int:
             [str(lake), "env", "lean", relative_target],
             cwd=proofs_dir,
             env=lake_env,
+            timeout_seconds=args.timeout_seconds,
         )
         record["name"] = "lake env lean"
         payload["methods"].append(record)
@@ -171,9 +233,14 @@ def main() -> int:
         discovered_path = build_lean_path(proofs_dir)
         existing_path = env.get("LEAN_PATH", "")
         env["LEAN_PATH"] = (
-            f"{discovered_path}{Path.pathsep}{existing_path}" if existing_path else discovered_path
+            f"{discovered_path}{os.pathsep}{existing_path}" if existing_path else discovered_path
         )
-        record = run_command([str(lean), relative_target], cwd=proofs_dir, env=env)
+        record = run_command(
+            [str(lean), relative_target],
+            cwd=proofs_dir,
+            env=env,
+            timeout_seconds=args.timeout_seconds,
+        )
         record["name"] = "direct lean with LEAN_PATH"
         payload["methods"].append(record)
         if record["success"]:

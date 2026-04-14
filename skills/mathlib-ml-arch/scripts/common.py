@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 WINDOWS = os.name == "nt"
+PLUGIN_SLUG = "mathlib-ml-arch"
 
 
 def configure_stdout() -> None:
@@ -19,14 +20,27 @@ def configure_stdout() -> None:
         pass
 
 
+def safe_resolve(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except OSError:
+        return path.absolute()
+    except RuntimeError:
+        return path.absolute()
+
+
 def normalize_path(path: str | Path | None) -> Path | None:
     if path is None:
         return None
-    return Path(path).expanduser().resolve()
+    return safe_resolve(Path(path).expanduser())
+
+
+def requested_workspace_root(start: str | Path | None = None) -> Path:
+    return normalize_path(start) or Path.cwd().resolve()
 
 
 def find_existing_proofs_root(start: str | Path | None = None) -> Path | None:
-    anchor = normalize_path(start) or Path.cwd().resolve()
+    anchor = requested_workspace_root(start)
     for root in [anchor, *anchor.parents]:
         if (root / "proofs").is_dir():
             return root
@@ -34,7 +48,62 @@ def find_existing_proofs_root(start: str | Path | None = None) -> Path | None:
 
 
 def infer_workspace_root(start: str | Path | None = None) -> Path:
-    return find_existing_proofs_root(start) or (normalize_path(start) or Path.cwd().resolve())
+    return find_existing_proofs_root(start) or requested_workspace_root(start)
+
+
+def codex_home() -> Path:
+    configured = os.environ.get("CODEX_HOME")
+    if configured:
+        return safe_resolve(Path(configured).expanduser())
+
+    profile = os.environ.get("USERPROFILE") or os.environ.get("HOME")
+    base = safe_resolve(Path(profile).expanduser()) if profile else safe_resolve(Path.home())
+    return base / ".codex"
+
+
+def shared_workspace_root(plugin_slug: str = PLUGIN_SLUG) -> Path:
+    return safe_resolve(codex_home() / "cache" / plugin_slug / "shared_workspace")
+
+
+def find_shared_proofs_root(plugin_slug: str = PLUGIN_SLUG) -> Path | None:
+    root = shared_workspace_root(plugin_slug)
+    if (root / "proofs").is_dir():
+        return root
+    return None
+
+
+def is_shared_workspace(root: str | Path | None, plugin_slug: str = PLUGIN_SLUG) -> bool:
+    normalized = normalize_path(root)
+    if normalized is None:
+        return False
+    return normalized == shared_workspace_root(plugin_slug)
+
+
+def resolve_proofs_workspace(
+    start: str | Path | None = None,
+    scope: str = "auto",
+    plugin_slug: str = PLUGIN_SLUG,
+) -> tuple[Path | None, str | None]:
+    local_root = find_existing_proofs_root(start)
+    shared_root = find_shared_proofs_root(plugin_slug)
+
+    if scope == "local":
+        if local_root is None:
+            return None, None
+        resolved_scope = "shared" if is_shared_workspace(local_root, plugin_slug) else "local"
+        return local_root, resolved_scope
+
+    if scope == "shared":
+        return (shared_root, "shared") if shared_root is not None else (None, None)
+
+    if local_root is not None:
+        resolved_scope = "shared" if is_shared_workspace(local_root, plugin_slug) else "local"
+        return local_root, resolved_scope
+
+    if shared_root is not None:
+        return shared_root, "shared"
+
+    return None, None
 
 
 def derive_user_profile_from_tool(tool: Path | None) -> Path | None:
@@ -48,7 +117,7 @@ def derive_user_profile_from_tool(tool: Path | None) -> Path | None:
         parent = parent.parent
 
     user_profile = os.environ.get("USERPROFILE") or os.environ.get("HOME")
-    return Path(user_profile).expanduser().resolve() if user_profile else None
+    return safe_resolve(Path(user_profile).expanduser()) if user_profile else None
 
 
 def candidate_user_profiles() -> list[Path]:
@@ -64,7 +133,7 @@ def candidate_user_profiles() -> list[Path]:
     for value in raw_values:
         if not value:
             continue
-        path = Path(value).expanduser().resolve()
+        path = safe_resolve(Path(value).expanduser())
         if path not in seen:
             candidates.append(path)
             seen.add(path)

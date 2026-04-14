@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import configure_stdout, find_existing_proofs_root
+from common import configure_stdout, requested_workspace_root, resolve_proofs_workspace, shared_workspace_root
 
 
 DECLARATION_RE = re.compile(
@@ -20,11 +20,23 @@ NAMESPACE_RE = re.compile(r"^\s*namespace\s+(?P<name>[A-Za-z0-9_'.]+)\s*$")
 END_RE = re.compile(r"^\s*end\b")
 
 
-def missing_proofs_message() -> str:
+def missing_proofs_message(scope: str) -> str:
+    shared_root = shared_workspace_root()
+    if scope == "shared":
+        return (
+            "No shared Lean proofs project was found. Expected a `proofs/` directory under "
+            f"{shared_root}. Run bootstrap_proofs.py --scope shared first."
+        )
+    if scope == "local":
+        return (
+            "No repo-local Lean proofs project was found. Expected a `proofs/` directory in the current "
+            "workspace or one of its parent directories. Run bootstrap_proofs.py --scope local first."
+        )
+
     return (
-        "No local Lean proofs project was found. Expected a `proofs/` directory in the current "
-        "workspace or one of its parent directories. Run bootstrap_proofs.py first or point "
-        "the script at a workspace that already contains `proofs/`."
+        "No Lean proofs project was found. Checked the current workspace, its parent directories, "
+        f"and the shared CODEX_HOME cache at {shared_root}. Run bootstrap_proofs.py first, or use "
+        "--scope local to require a repo-local proofs/ project."
     )
 
 
@@ -36,6 +48,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--workspace",
         help="Workspace root or child directory to search from. Defaults to the current directory.",
+    )
+    parser.add_argument(
+        "--scope",
+        choices=["auto", "local", "shared"],
+        default="auto",
+        help="Which proofs workspace to search. `auto` prefers a repo-local proofs/ project and otherwise uses the shared CODEX_HOME cache.",
     )
     parser.add_argument(
         "--ignore-case",
@@ -292,9 +310,10 @@ def print_text_results(candidates: list[dict[str, object]], raw_hits: list[dict[
 def main() -> int:
     configure_stdout()
     args = parse_args()
-    root = find_existing_proofs_root(args.workspace)
+    requested_workspace = requested_workspace_root(args.workspace)
+    root, selected_scope = resolve_proofs_workspace(requested_workspace, args.scope)
     if root is None:
-        print(missing_proofs_message(), file=sys.stderr)
+        print(missing_proofs_message(args.scope), file=sys.stderr)
         return 2
 
     directories = candidate_dirs(root)
@@ -348,7 +367,9 @@ def main() -> int:
 
     if args.json:
         payload = {
+            "requested_workspace": str(requested_workspace),
             "workspace_root": str(root),
+            "selected_scope": selected_scope,
             "query": args.query,
             "mode": args.mode,
             "candidates": candidates if args.mode in {"candidates", "both"} else [],

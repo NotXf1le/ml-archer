@@ -11,9 +11,13 @@ from common import (
     configure_stdout,
     default_project_name,
     discover_package_lib_dirs,
+    find_existing_proofs_root,
     find_lake,
     git_safe_directories_for_proofs,
-    infer_workspace_root,
+    is_shared_workspace,
+    requested_workspace_root,
+    resolve_proofs_workspace,
+    shared_workspace_root,
     subprocess_env_for_tool,
 )
 
@@ -31,6 +35,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--workspace",
         help="Workspace root or child directory. Defaults to the current directory.",
+    )
+    parser.add_argument(
+        "--scope",
+        choices=["auto", "local", "shared"],
+        default="auto",
+        help="Where to create or reuse the proofs project. `auto` prefers a repo-local proofs/ project and otherwise uses the shared CODEX_HOME cache.",
     )
     parser.add_argument(
         "--proofs-dir",
@@ -92,7 +102,8 @@ def ensure_scratch_file(path: Path) -> None:
 
 
 def print_human(payload: dict[str, object]) -> None:
-    print(f"workspace: {payload['workspace_root']}")
+    print(f"requested workspace: {payload['requested_workspace']}")
+    print(f"selected workspace: {payload['workspace_root']} ({payload['selected_scope']})")
     print(f"proofs: {payload['proofs_dir']}")
     print(f"project initialized: {payload['project_initialized']}")
     print(f"scratch file present: {payload['proof_scratch_exists']}")
@@ -117,13 +128,30 @@ def print_human(payload: dict[str, object]) -> None:
 def main() -> int:
     configure_stdout()
     args = parse_args()
-    workspace_root = infer_workspace_root(args.workspace)
+    requested_workspace = requested_workspace_root(args.workspace)
+    local_workspace = find_existing_proofs_root(requested_workspace)
+    resolved_workspace, resolved_scope = resolve_proofs_workspace(requested_workspace, args.scope)
+
+    if args.scope == "local":
+        workspace_root = resolved_workspace or requested_workspace
+        selected_scope = "shared" if is_shared_workspace(workspace_root) else "local"
+    elif args.scope == "shared":
+        workspace_root = shared_workspace_root()
+        selected_scope = "shared"
+    else:
+        workspace_root = resolved_workspace or shared_workspace_root()
+        selected_scope = resolved_scope or "shared"
+
     proofs_dir = (workspace_root / args.proofs_dir).resolve()
     project_name = args.name or default_project_name(workspace_root)
     lake = find_lake()
 
     payload: dict[str, object] = {
+        "requested_workspace": str(requested_workspace),
         "workspace_root": str(workspace_root),
+        "selected_scope": selected_scope,
+        "local_workspace_root": str(local_workspace) if local_workspace else None,
+        "shared_workspace_root": str(shared_workspace_root()),
         "proofs_dir": str(proofs_dir),
         "project_initialized": False,
         "proof_scratch_exists": False,
