@@ -15,29 +15,47 @@ Use this skill to keep formal math, architecture judgment, and empirical claims 
    - empirical or product/system constraint
 2. Read `references/architecture_contract.md` first.
 3. Read `references/mathlib_scope.md` when you need theorem families, search patterns, or local setup reminders.
-4. Search local evidence before making formal claims:
+4. If the local Lean setup is unclear, inspect it first:
+
+```bash
+python "<resolved-skill-dir>/scripts/doctor.py"
+```
+
+5. If `proofs/` is missing and the workspace should support formal checks, bootstrap it before searching:
+
+```bash
+python "<resolved-skill-dir>/scripts/bootstrap_proofs.py"
+```
+
+If bootstrap is not possible in the current workspace, say that formal verification is unavailable here.
+
+6. Search local evidence before making formal claims:
 
 ```bash
 python "<resolved-skill-dir>/scripts/search_mathlib.py" "<query>"
 ```
 
-5. Confirm that the target workspace has a local Lean project at `proofs/` before treating formal verification as available. The plugin does not bundle one for you.
-6. Validate candidate theorems in `proofs/ProofScratch.lean` before citing them as formal support:
+Use `--json` when you want machine-readable theorem candidates with names, import paths, and locations.
+
+7. Validate candidate theorems in `proofs/ProofScratch.lean` before citing them as formal support:
 
 ```bash
 python "<resolved-skill-dir>/scripts/lean_check.py"
 ```
 
-7. Write the response in this order:
+The result counts as verified only when `lean_check.py` succeeds. If it falls back from `lake env lean` to direct `lean` with `LEAN_PATH`, record that verification method explicitly.
+
+8. Write the response in this order:
    - Proposed architecture
    - Formal evidence from mathlib
    - Engineering inference built on top of formal facts
    - Gaps requiring benchmarks or papers
    - Risks
 
-8. For nontrivial requests, emit the artifact bundle defined in `references/architecture_contract.md`:
+9. For nontrivial requests, emit the artifact bundle defined in `references/architecture_contract.md`:
    - `report.md`
    - `evidence.json`
+   - `session_log.json` when bootstrap or verification diagnostics matter
 
    Keep the bundle consistent with the written response.
 
@@ -46,8 +64,9 @@ python "<resolved-skill-dir>/scripts/lean_check.py"
 - Never call a heuristic "proved".
 - If no supporting theorem is found or verified, write `No direct formal support found in mathlib.`
 - If a theorem only proves a local property, state the exact boundary.
-- If Lean tooling is missing or the scratch file was not checked, treat the result as unverified.
-- If the workspace has no `proofs/` directory, say that formal verification was unavailable because the local Lean project is missing. Do not attribute that case to `lake`, `git`, or theorem failure.
+- If Lean tooling is missing or `lean_check.py` does not succeed, treat the result as unverified.
+- If the workspace has no `proofs/` directory, say that formal verification was unavailable because the local Lean project is missing or bootstrap was not run. Do not attribute that case to theorem failure.
+- If fallback verification was used, record the exact verification method rather than implying the official `lake env lean` path succeeded.
 - For nontrivial requests, treat the artifact bundle as required rather than optional.
 
 ## Evidence Record
@@ -64,5 +83,7 @@ For each cited theorem or definition, record:
 
 - `references/architecture_contract.md`: required output contract and claim-labeling rules.
 - `references/mathlib_scope.md`: boundaries of what mathlib can and cannot support, plus query ideas and local setup notes.
-- `scripts/search_mathlib.py`: search the current repo's `proofs/` project and any downloaded mathlib checkout for candidate definitions and theorems.
-- `scripts/lean_check.py`: run `lake env lean` on the current repo's `proofs/ProofScratch.lean` when Lean and mathlib are installed locally.
+- `scripts/doctor.py`: inspect the local Lean/mathlib environment and emit agent-friendly diagnostics.
+- `scripts/bootstrap_proofs.py`: create `proofs/`, initialize mathlib, fetch cache when needed, and run a smoke verification pass.
+- `scripts/search_mathlib.py`: search the current repo's `proofs/` project and any downloaded mathlib checkout for ranked theorem candidates.
+- `scripts/lean_check.py`: verify `proofs/ProofScratch.lean` via `lake env lean`, with direct `lean` fallback when the official path is unavailable.

@@ -6,7 +6,11 @@ plugin focused on disciplined ML architecture audits.
 ## What It Does
 
 - separates formal support, engineering inference, and empirical gaps
+- bootstraps a local `proofs/` project when the workspace does not already have one
+- inspects the local Lean/mathlib environment with agent-friendly diagnostics
 - searches local Lean/mathlib evidence before making formal claims
+- returns ranked theorem candidates with names, import paths, and source locations
+- verifies `ProofScratch.lean` through `lake env lean` with direct `lean` fallback
 - emits a compact artifact bundle with `report.md` and `evidence.json`
 - runs a lightweight post-write validation pass over audit artifacts
 
@@ -47,16 +51,23 @@ sections and evidence fields.
 ## Lean Prerequisites
 
 Formal mathlib checks are workspace-dependent. This plugin does not bundle a
-standalone `proofs/` project or a pre-fetched mathlib checkout.
+pre-fetched mathlib checkout, but it does ship bootstrap and diagnostics
+helpers for the target workspace.
 
-Before invoking `search_mathlib.py` or `lean_check.py`, the target workspace
-must provide:
+Recommended sequence:
 
-- `proofs/lean-toolchain`
-- `proofs/lakefile.toml`
-- `proofs/ProofScratch.lean`
+1. Run `scripts/doctor.py` to inspect the current workspace state.
+2. If `proofs/` is missing, run `scripts/bootstrap_proofs.py`.
+3. Use `scripts/search_mathlib.py` to retrieve theorem candidates.
+4. Use `scripts/lean_check.py` to validate `proofs/ProofScratch.lean`.
 
-After Lean is installed, run `lake update` from `proofs/`.
+When `lake env lean` is unavailable but compiled package libraries exist,
+`lean_check.py` can fall back to direct `lean` with a discovered `LEAN_PATH`
+and records that verification method explicitly.
+
+On sandboxed Windows runs, the plugin also injects temporary `git safe.directory`
+entries for `proofs/.lake/packages/*`, which prevents `lake` from failing on
+package repos owned by a different local user.
 
 If `proofs/` is missing, agents should report that local formal verification is
 unavailable rather than blaming `lake`, `git`, or missing theorems.

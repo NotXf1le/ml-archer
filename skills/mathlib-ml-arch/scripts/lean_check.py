@@ -1,29 +1,30 @@
 from __future__ import annotations
 
 import argparse
-import os
-import shutil
+import json
 import subprocess
 import sys
 from pathlib import Path
 
-
-def repo_root() -> Path:
-    search_roots = [Path.cwd(), *Path.cwd().parents, Path(__file__).resolve().parent]
-    for root in search_roots:
-        if (root / "proofs").is_dir():
-            return root
-    raise FileNotFoundError(
-        "Could not locate the repo root. Run this command from the target repo or a child directory."
-    )
+from common import (
+    add_git_safe_directories,
+    build_lean_path,
+    configure_stdout,
+    discover_package_lib_dirs,
+    find_existing_proofs_root,
+    git_safe_directories_for_proofs,
+    find_lake,
+    find_lean,
+    subprocess_env_for_tool,
+)
 
 
 def missing_proofs_message() -> str:
     return (
         "No local Lean proofs project was found. Expected a `proofs/` directory in the current "
-        "workspace or one of its parent directories. This plugin does not bundle mathlib sources "
-        "by itself. Create `proofs/lean-toolchain`, `proofs/lakefile.toml`, and "
-        "`proofs/ProofScratch.lean`, then run `lake update` inside `proofs/` before retrying."
+        "workspace or one of its parent directories. Run bootstrap_proofs.py first or create "
+        "`proofs/lean-toolchain`, `proofs/lakefile.toml`, and `proofs/ProofScratch.lean` "
+        "before retrying."
     )
 
 
@@ -32,89 +33,170 @@ def parse_args() -> argparse.Namespace:
         description="Typecheck a Lean scratch file inside the local proofs project."
     )
     parser.add_argument(
+        "--workspace",
+        help="Workspace root or child directory to search from. Defaults to the current directory.",
+    )
+    parser.add_argument(
         "--file",
         default="ProofScratch.lean",
         help="Lean file inside proofs/ to typecheck.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["auto", "lake", "direct"],
+        default="auto",
+        help="Verification mode. `auto` tries `lake env lean` first, then falls back to direct lean.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON diagnostics.",
+    )
     return parser.parse_args()
 
 
-def find_lake() -> Path | None:
-    path_hit = shutil.which("lake")
-    if path_hit is not None:
-        return Path(path_hit)
-
-    user_profile = Path(os.environ.get("USERPROFILE", str(Path.home())))
-    candidates = [
-        user_profile / ".elan" / "bin" / "lake.exe",
-        user_profile
-        / "AppData"
-        / "Local"
-        / "Microsoft"
-        / "WinGet"
-        / "Packages"
-        / "Lean.Lean_Microsoft.Winget.Source_8wekyb3d8bbwe"
-        / "lean-4.29.0-windows"
-        / "bin"
-        / "lake.exe",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return None
+def run_command(command: list[str], cwd: Path, env: dict[str, str]) -> dict[str, object]:
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return {
+        "command": command,
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "success": result.returncode == 0,
+    }
 
 
-def subprocess_env(lake: Path) -> dict[str, str]:
-    env = os.environ.copy()
-    env["PATH"] = f"{lake.parent}{os.pathsep}{env.get('PATH', '')}"
-    user_profile = env.get("USERPROFILE")
-    if user_profile and ".elan" in str(lake):
-        env["ELAN_HOME"] = str(Path(user_profile) / ".elan")
-        env["HOME"] = user_profile
-        env["USERPROFILE"] = user_profile
-    return env
+def print_human_summary(payload: dict[str, object]) -> None:
+    if payload["success"]:
+        method = payload.get("verification_method", "unknown")
+        print(f"Verified {payload['target']} via {method}.")
+    else:
+        print(f"Verification failed for {payload['target']}.", file=sys.stderr)
+
+    print(f"workspace: {payload['workspace_root']}")
+    print(f"proofs: {payload['proofs_dir']}")
+    print(f"lake: {payload.get('lake_path') or 'not found'}")
+    print(f"lean: {payload.get('lean_path') or 'not found'}")
+    print(f"library paths: {payload['library_path_count']}")
+
+    for method in payload["methods"]:
+        label = method["name"]
+        outcome = "ok" if method["success"] else f"failed ({method['returncode']})"
+        print(f"{label}: {outcome}")
+        stderr = str(method.get("stderr", "")).strip()
+        if stderr:
+            print(f"  stderr: {stderr.splitlines()[-1]}")
 
 
 def main() -> int:
+    configure_stdout()
     args = parse_args()
-    try:
-        root = repo_root()
-    except FileNotFoundError:
-        print(missing_proofs_message(), file=sys.stderr)
+    root = find_existing_proofs_root(args.workspace)
+    if root is None:
+        payload = {
+            "success": False,
+            "error": missing_proofs_message(),
+            "workspace_root": str(Path(args.workspace).resolve()) if args.workspace else str(Path.cwd().resolve()),
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print(missing_proofs_message(), file=sys.stderr)
         return 4
 
     proofs_dir = root / "proofs"
-    target = proofs_dir / args.file
+    target = Path(args.file)
+    if not target.is_absolute():
+        target = proofs_dir / target
+    target = target.resolve()
 
     if not target.exists():
-        print(f"Lean target not found: {target}", file=sys.stderr)
+        payload = {
+            "success": False,
+            "error": f"Lean target not found: {target}",
+            "workspace_root": str(root),
+            "proofs_dir": str(proofs_dir),
+            "target": str(target),
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print(f"Lean target not found: {target}", file=sys.stderr)
         return 1
 
     lake = find_lake()
-    if lake is None:
-        print(
-            "The `lake` executable was not found on PATH or in standard user install locations. "
-            "Install Lean 4, then run `lake update` inside proofs/ before retrying.",
-            file=sys.stderr,
-        )
-        return 2
+    lean = find_lean(lake)
+    lib_dirs = discover_package_lib_dirs(proofs_dir)
+    relative_target = str(target.relative_to(proofs_dir))
 
-    mathlib_dir = proofs_dir / ".lake" / "packages" / "mathlib" / "Mathlib"
-    if not mathlib_dir.exists():
-        print(
-            "The local mathlib checkout was not found at proofs/.lake/packages/mathlib/Mathlib. "
-            "Run `lake update` inside proofs/ after Lean is installed.",
-            file=sys.stderr,
-        )
-        return 3
+    payload: dict[str, object] = {
+        "success": False,
+        "workspace_root": str(root),
+        "proofs_dir": str(proofs_dir),
+        "target": str(target),
+        "lake_path": str(lake) if lake else None,
+        "lean_path": str(lean) if lean else None,
+        "library_paths": [str(path) for path in lib_dirs],
+        "library_path_count": len(lib_dirs),
+        "methods": [],
+        "verification_method": None,
+    }
 
-    result = subprocess.run(
-        [str(lake), "env", "lean", target.name],
-        cwd=proofs_dir,
-        check=False,
-        env=subprocess_env(lake),
-    )
-    return result.returncode
+    if args.mode in {"auto", "lake"} and lake is not None:
+        lake_env = subprocess_env_for_tool(lake)
+        add_git_safe_directories(lake_env, git_safe_directories_for_proofs(proofs_dir))
+        record = run_command(
+            [str(lake), "env", "lean", relative_target],
+            cwd=proofs_dir,
+            env=lake_env,
+        )
+        record["name"] = "lake env lean"
+        payload["methods"].append(record)
+        if record["success"]:
+            payload["success"] = True
+            payload["verification_method"] = "lake env lean"
+
+    can_try_direct = args.mode in {"auto", "direct"} and lean is not None and len(lib_dirs) > 0
+    if not payload["success"] and can_try_direct:
+        env = subprocess_env_for_tool(lean)
+        discovered_path = build_lean_path(proofs_dir)
+        existing_path = env.get("LEAN_PATH", "")
+        env["LEAN_PATH"] = (
+            f"{discovered_path}{Path.pathsep}{existing_path}" if existing_path else discovered_path
+        )
+        record = run_command([str(lean), relative_target], cwd=proofs_dir, env=env)
+        record["name"] = "direct lean with LEAN_PATH"
+        payload["methods"].append(record)
+        if record["success"]:
+            payload["success"] = True
+            payload["verification_method"] = "direct lean with LEAN_PATH fallback"
+
+    if not payload["success"] and not payload["methods"]:
+        missing = []
+        if args.mode in {"auto", "lake"} and lake is None:
+            missing.append("lake executable not found")
+        if args.mode in {"auto", "direct"}:
+            if lean is None:
+                missing.append("lean executable not found")
+            if not lib_dirs:
+                missing.append("no compiled package libraries were found under proofs/.lake")
+        payload["error"] = "; ".join(missing) or "No verification method could be attempted."
+
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        print_human_summary(payload)
+
+    return 0 if payload["success"] else 3
 
 
 if __name__ == "__main__":

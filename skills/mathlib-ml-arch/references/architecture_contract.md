@@ -33,6 +33,7 @@ For nontrivial requests, produce the following files alongside the response:
 
 - `report.md`
 - `evidence.json`
+- `session_log.json` when setup, verification, or fallback diagnostics matter
 
 The `evidence.json` file should be machine-readable and include, at minimum, these fields for each claim or theorem record:
 
@@ -42,6 +43,8 @@ The `evidence.json` file should be machine-readable and include, at minimum, the
 - `supported_subclaim`
 - `unsupported_boundary`
 - `claim_label`
+- `verified_in_lean`
+- `verification_method`
 
 The textual response should still follow the required output order, and the artifact bundle should not contradict it.
 

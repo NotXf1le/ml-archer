@@ -24,13 +24,18 @@ Use this file to decide whether a claim belongs in the formal layer or outside i
 - Prefer exact import paths and theorem names over broad paraphrases.
 - Record negative evidence when no direct theorem is found.
 - Use `python "<resolved-skill-dir>/scripts/search_mathlib.py" "<query>"` for local search.
+- Prefer `--json` when you want machine-readable theorem candidates with names, import paths, and source locations.
 
 ## Local Proof Workflow
 
-- The plugin does not ship a standalone `proofs/` project. Formal checking only works when the target workspace already contains one.
+- The plugin does not ship a pre-fetched standalone `proofs/` project, but it does ship bootstrap and diagnostics helpers.
+- Start with `python "<resolved-skill-dir>/scripts/doctor.py"` when you need to know whether the workspace is ready.
+- If `proofs/` is missing, run `python "<resolved-skill-dir>/scripts/bootstrap_proofs.py"` before treating formal verification as available.
 - This repo is currently pinned to Lean `4.29.0` and `mathlib` `v4.29.0`.
 - Install Lean 4 through `elan` or the direct Windows `Lean` package so `lake` is available.
-- From `proofs/`, run `lake update`.
-- Optionally run `lake exe cache get` after dependencies resolve to fetch prebuilt artifacts.
+- From `proofs/`, run `lake update` only when mathlib sources are missing or you intentionally want to refresh dependencies.
+- Run `lake exe cache get` when compiled `.olean` artifacts are missing.
 - Keep `proofs/lean-toolchain` and `proofs/lakefile.toml` on matching release lines when you intentionally upgrade.
-- If `proofs/` is missing, report that the local Lean project is absent and keep all mathlib claims in the unverified or negative-evidence bucket.
+- `lean_check.py` now treats `lake env lean` as the preferred verification path and direct `lean` with discovered `LEAN_PATH` as an explicit fallback.
+- On sandboxed Windows runs, the plugin injects temporary `git safe.directory` entries for `proofs/.lake/packages/*` so `lake` can inspect package repos without global git config changes.
+- If `proofs/` is missing and bootstrap is not run, report that the local Lean project is absent and keep all mathlib claims in the unverified or negative-evidence bucket.

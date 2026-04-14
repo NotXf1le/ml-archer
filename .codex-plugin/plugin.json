@@ -1,7 +1,7 @@
 {
   "name": "mathlib-ml-arch",
-  "version": "1.0.0",
-  "description": "Production-ready ML architecture audits grounded in Lean/mathlib evidence.",
+  "version": "1.1.0",
+  "description": "Production-ready ML architecture audits grounded in Lean/mathlib evidence, with bootstrap, diagnostics, and fallback verification.",
   "author": {
     "name": "Felix"
   },
@@ -17,7 +17,7 @@
   "interface": {
     "displayName": "Mathlib ML Architect",
     "shortDescription": "Audit ML architecture claims with formal support boundaries",
-    "longDescription": "A production-ready skill-only plugin for ML architecture audits. It separates formal support, engineering inference, and empirical gaps, and emits a compact artifact bundle with report.md and evidence.json, without UI or server dependencies.",
+    "longDescription": "A production-ready skill-only plugin for ML architecture audits. It separates formal support, engineering inference, and empirical gaps, can bootstrap a local proofs project, surfaces theorem-aware search results, and emits compact review artifacts without UI or server dependencies.",
     "developerName": "Felix",
     "category": "Productivity",
     "capabilities": [
@@ -25,6 +25,7 @@
       "Write"
     ],
     "defaultPrompt": [
+      "Bootstrap a local proofs project for this workspace and verify the Lean setup",
       "Audit this ML architecture for role mixing and hidden assumption leaks",
       "Generate report.md and evidence.json for the current architecture review",
       "Recheck the current architecture audit and tighten unsupported claims"

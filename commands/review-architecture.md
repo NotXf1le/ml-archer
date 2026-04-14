@@ -11,10 +11,12 @@ Audit an ML architecture with the `mathlib-ml-arch` discipline.
 
 1. Inventory the important internal variables, modules, and state.
 2. Assign entity signatures and typed interfaces where the design mixes roles.
-3. Check whether the target workspace has a local `proofs/` project. If not, state that formal verification is unavailable in this workspace.
-4. Search for local mathlib evidence before claiming formal support.
-5. Separate each claim into formal support, engineering inference, or empirical gap.
-6. Emit the artifact bundle required by the skill contract.
+3. Run `doctor.py` when the local Lean setup is uncertain.
+4. If the target workspace has no local `proofs/` project and formal checks should be possible, run `bootstrap_proofs.py`. Otherwise state that formal verification is unavailable in this workspace.
+5. Search for local mathlib evidence before claiming formal support.
+6. Verify candidate theorems with `lean_check.py`, and record the exact verification method if fallback verification was used.
+7. Separate each claim into formal support, engineering inference, or empirical gap.
+8. Emit the artifact bundle required by the skill contract.
 
 ## Output Contract
 
@@ -28,7 +30,8 @@ The default artifact location should be `reports/` next to the workspace root or
 plugin root. The post-write hook watches that location and validates
 `report.md` or `architecture_audit_report*.md` plus `evidence.json` when they
 become structurally valid. Sample/demo artifacts belong in
-`fixtures/review-architecture/`.
+`fixtures/review-architecture/`. Add `session_log.json` when bootstrap or
+verification diagnostics are part of the audit trail.
 
 If no theorem or definition can be verified, state:
 
