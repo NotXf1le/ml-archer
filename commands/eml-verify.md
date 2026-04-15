@@ -20,3 +20,4 @@ Generate a workspace-namespaced scratch Lean file for one EML normalization atte
 - Only mark a root claim as `Formal support` when the root formula is in the exact shipped subset and `lean_check.py` succeeds.
 - Keep unsupported arithmetic or branch assumptions in `unsupported_boundary` instead of guessing a witness.
 - Record the exact verification method returned by `lean_check.py`.
+- If the shared environment is only `search-ready`, say that verification setup is still required and point to `python scripts/setup_plugin.py --target verify --yes`.

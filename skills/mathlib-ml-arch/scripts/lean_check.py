@@ -152,8 +152,14 @@ def main() -> int:
         require_verification=True,
     )
     if root is None or not bool(workspace_status.get("ready_for_verification")):
+        setup_required = bool(workspace_status.get("ready_for_search")) and not bool(workspace_status.get("ready_for_verification"))
         error = missing_proofs_message(args.scope)
-        if bootstrap_payload is not None:
+        if setup_required:
+            error = (
+                "Shared proofs workspace is only search-ready. "
+                "Run `python scripts/setup_plugin.py --target verify --yes` to prepare full Lean verification artifacts."
+            )
+        if bootstrap_payload is not None and not setup_required:
             error = (
                 "Shared proofs workspace is not ready for Lean verification even after bootstrap. "
                 f"Bootstrap status: {bootstrap_payload.get('status', 'failure')}."
@@ -165,7 +171,7 @@ def main() -> int:
             "workspace_root": str(root) if root else str(requested_workspace),
             "selected_scope": selected_scope,
             "shared_workspace_root": str(shared_workspace_root()),
-            "verification_method": "unavailable:bootstrap_failed",
+            "verification_method": "unavailable:setup_required" if setup_required else "unavailable:bootstrap_failed",
             "bootstrap": bootstrap_payload,
         }
         if args.json:

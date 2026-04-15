@@ -228,7 +228,7 @@ def main() -> int:
             lean_payload = {
                 "success": False,
                 "verification_method": "unavailable:bootstrap_failed",
-                "error": "No usable shared proofs workspace was found after automatic bootstrap.",
+                "error": "No usable shared proofs workspace was found after automatic bootstrap. Run `python scripts/setup_plugin.py --target search` first, then rerun with `--target verify` setup when theorem checking is required.",
                 "bootstrap": bootstrap_payload,
             }
             verification_method = str(lean_payload["verification_method"])

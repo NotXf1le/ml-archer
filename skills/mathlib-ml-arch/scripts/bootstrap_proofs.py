@@ -58,6 +58,12 @@ def parse_args() -> argparse.Namespace:
         help="Proof project directory relative to the workspace root.",
     )
     parser.add_argument(
+        "--target",
+        choices=["search", "verify"],
+        default="search",
+        help="Desired readiness level. `search` prepares theorem search; `verify` additionally prepares Lean verification artifacts.",
+    )
+    parser.add_argument(
         "--name",
         help="Lean project name used for `lake init`. Defaults to <WorkspaceName>Proofs.",
     )
@@ -72,9 +78,14 @@ def parse_args() -> argparse.Namespace:
         help="Do not run `lake exe cache get` even if compiled libraries are missing.",
     )
     parser.add_argument(
+        "--build-mathlib",
+        action="store_true",
+        help="Allow `lake build Mathlib` as a heavyweight fallback when `Mathlib.olean` is still missing.",
+    )
+    parser.add_argument(
         "--skip-verify",
         action="store_true",
-        help="Skip the final `lean_check.py` smoke test.",
+        help="Skip the final `lean_check.py` smoke test when `--target verify` is used.",
     )
     parser.add_argument(
         "--timeout-seconds",
@@ -364,6 +375,7 @@ def print_human(payload: dict[str, object]) -> None:
     print(f"requested workspace: {payload['requested_workspace']}")
     print(f"selected workspace: {payload['workspace_root']} ({payload['selected_scope']})")
     print(f"proofs: {payload['proofs_dir']}")
+    print(f"target readiness: {payload['target']}")
     environment = payload.get("environment", {})
     if environment:
         print(f"codex home: {environment.get('codex_home')}")
@@ -371,6 +383,7 @@ def print_human(payload: dict[str, object]) -> None:
         print(f"tool ELAN_HOME: {environment.get('elan_home') or 'unset'}")
     print(f"project initialized: {payload['project_initialized']}")
     print(f"scratch file present: {payload['proof_scratch_exists']}")
+    print(f"readiness level: {payload.get('readiness_level', 'incomplete')}")
     for step in payload["steps"]:
         if step["success"]:
             outcome = "ok"
@@ -418,6 +431,9 @@ def main() -> int:
     shared_root = shared_workspace_root()
     shared_write_error = writability_error(shared_root)
     selected_write_error = writability_error(workspace_root)
+    wants_verification = args.target == "verify"
+    should_build_mathlib = args.build_mathlib or wants_verification
+    should_run_verify = wants_verification and not args.skip_verify
 
     payload: dict[str, object] = {
         "requested_workspace": str(requested_workspace),
@@ -431,6 +447,8 @@ def main() -> int:
         "selected_workspace_writable": selected_write_error is None,
         "selected_workspace_write_error": selected_write_error,
         "proofs_dir": str(proofs_dir),
+        "target": args.target,
+        "build_mathlib_requested": should_build_mathlib,
         "project_initialized": False,
         "proof_scratch_exists": False,
         "steps": [],
@@ -446,6 +464,7 @@ def main() -> int:
         },
         "success": False,
         "status": "failure",
+        "readiness_level": "incomplete",
     }
 
     if ignored_local_workspace is not None:
@@ -661,7 +680,7 @@ def main() -> int:
                 append_unique(payload["next_steps"], cache_step["guidance"])
 
     mathlib_artifact = mathlib_module_artifact(proofs_dir)
-    if can_attempt_cache and not mathlib_artifact.exists():
+    if can_attempt_cache and should_build_mathlib and not mathlib_artifact.exists():
         build_step = run_command(
             [str(lake), "build", "Mathlib"],
             cwd=proofs_dir,
@@ -681,7 +700,17 @@ def main() -> int:
             else:
                 append_unique(payload["next_steps"], build_step["guidance"])
 
-    if not args.skip_verify:
+    if not should_build_mathlib and not mathlib_artifact.exists():
+        append_unique(
+            payload["warnings"],
+            "Search-ready bootstrap stops before `lake build Mathlib`; verification artifacts are still missing.",
+        )
+        append_unique(
+            payload["next_steps"],
+            "Run `python scripts/setup_plugin.py --target verify --yes` or `python scripts/bootstrap_proofs.py --target verify` when you need full Lean verification artifacts.",
+        )
+
+    if should_run_verify:
         lean_check = Path(__file__).with_name("lean_check.py")
         try:
             verify_proc = subprocess.run(
@@ -726,13 +755,33 @@ def main() -> int:
             )
 
     package_lib_dirs = discover_package_lib_dirs(proofs_dir)
-    verification_success = bool(payload["verification"].get("success")) if payload["verification"] else args.skip_verify
+    search_ready = (
+        payload["project_initialized"]
+        and payload["proof_scratch_exists"]
+        and mathlib_source.exists()
+    )
+    verification_ready = (
+        search_ready
+        and mathlib_artifact.exists()
+        and len(package_lib_dirs) > 0
+    )
+    if verification_ready:
+        readiness_level = "verification-ready"
+    elif search_ready:
+        readiness_level = "search-ready"
+    else:
+        readiness_level = "incomplete"
+    verification_success = bool(payload["verification"].get("success")) if payload["verification"] else None
     payload["postconditions"] = {
         "mathlib_source_exists": mathlib_source.exists(),
         "mathlib_artifact_exists": mathlib_artifact.exists(),
         "package_library_path_count": len(package_lib_dirs),
-        "verification_success": verification_success if not args.skip_verify else None,
+        "ready_for_search": search_ready,
+        "ready_for_verification": verification_ready,
+        "readiness_level": readiness_level,
+        "verification_success": verification_success,
     }
+    payload["readiness_level"] = readiness_level
 
     if not args.skip_update and not payload["postconditions"]["mathlib_source_exists"]:
         append_unique(
@@ -742,22 +791,17 @@ def main() -> int:
     if not args.skip_cache and payload["postconditions"]["package_library_path_count"] == 0:
         append_unique(
             payload["next_steps"],
-            "Compiled package libraries are still missing. Run `lake exe cache get` or build the proofs project after `lake update` succeeds.",
+            "Compiled package libraries are still missing. Search can continue, but Lean verification will still require `lake exe cache get` or explicit verify setup.",
         )
     if not payload["postconditions"]["mathlib_artifact_exists"]:
-        append_unique(
-            payload["next_steps"],
-            "`Mathlib.olean` is still missing under `proofs/.lake/packages/mathlib/.lake/build/lib/lean`. Run `lake build Mathlib` or rerun bootstrap with a larger timeout.",
-        )
+        if should_build_mathlib:
+            append_unique(
+                payload["next_steps"],
+                "`Mathlib.olean` is still missing under `proofs/.lake/packages/mathlib/.lake/build/lib/lean`. Run `lake build Mathlib` again or rerun verify setup with a larger timeout.",
+            )
 
-    payload["success"] = (
-        payload["project_initialized"]
-        and payload["proof_scratch_exists"]
-        and (args.skip_update or payload["postconditions"]["mathlib_source_exists"])
-        and (args.skip_cache or payload["postconditions"]["package_library_path_count"] > 0)
-        and payload["postconditions"]["mathlib_artifact_exists"]
-        and (args.skip_verify or bool(payload["postconditions"]["verification_success"]))
-    )
+    target_ready = payload["postconditions"]["ready_for_verification"] if wants_verification else payload["postconditions"]["ready_for_search"]
+    payload["success"] = bool(target_ready) and (not should_run_verify or bool(payload["postconditions"]["verification_success"]))
 
     if payload["success"]:
         payload["status"] = "success"

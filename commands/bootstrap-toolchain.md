@@ -5,11 +5,12 @@ Populate a plugin-local Lean/Lake toolchain cache under `$CODEX_HOME/cache/mathl
 ## Workflow
 
 1. Use the root CLI entrypoint: `python scripts/bootstrap_toolchain.py`.
-2. Cache the `elan` launcher into the plugin toolchain cache.
-3. Prefer copying the currently active host Lean toolchain into the plugin cache instead of downloading again.
-4. If no usable host toolchain is active, let `elan toolchain install` populate the plugin-local `ELAN_HOME`.
-5. Confirm the plugin-local cache exposes `lake` and `lean`.
-6. Run `python scripts/doctor.py` after bootstrap if you want to confirm that future plugin runs will use the cached toolchain.
+2. Prefer `python scripts/setup_plugin.py --target search` for normal onboarding. Use `bootstrap_toolchain.py` directly only when you need to repair the toolchain layer without touching the shared proofs workspace.
+3. Cache the `elan` launcher into the plugin toolchain cache.
+4. Prefer copying the currently active host Lean toolchain into the plugin cache instead of downloading again.
+5. If no usable host toolchain is active, let `elan toolchain install` populate the plugin-local `ELAN_HOME`.
+6. Confirm the plugin-local cache exposes `lake` and `lean`.
+7. Run `python scripts/doctor.py` after bootstrap if you want to confirm that future plugin runs will use the cached toolchain.
 
 ## Expected Outputs
 

@@ -146,6 +146,7 @@ def build_payload(requested_workspace: Path, scope: str) -> dict[str, object]:
         "tool_home": tool_env.get("HOME"),
         "tool_elan_home": tool_env.get("ELAN_HOME"),
         "ready_for_search": bool(workspace_status["ready_for_search"]),
+        "readiness_level": str(workspace_status["readiness_level"]),
         "ready_for_lake_check": bool(workspace_status["ready_for_verification"]) and lake is not None and proof_scratch.exists(),
         "ready_for_direct_lean": bool(workspace_status["ready_for_verification"]) and lean is not None,
         "next_steps": [],
@@ -158,7 +159,7 @@ def build_payload(requested_workspace: Path, scope: str) -> dict[str, object]:
         )
     if not payload["proofs_exists"]:
         next_steps.append(
-            "Run bootstrap_proofs.py to create or refresh the shared proofs project under CODEX_HOME."
+            "Run `python scripts/setup_plugin.py --target search` to create or refresh the shared proofs project under CODEX_HOME."
         )
     if not payload["shared_workspace_writable"]:
         next_steps.append(
@@ -170,30 +171,30 @@ def build_payload(requested_workspace: Path, scope: str) -> dict[str, object]:
         next_steps.append("Create proofs/lakefile.toml or rerun bootstrap_proofs.py.")
     if lake is None:
         next_steps.append(
-            "Run bootstrap_toolchain.py to populate the plugin-local Lean toolchain cache, or install Lean 4 globally so `lake` is available."
+            "Run `python scripts/setup_plugin.py --target search` or `python scripts/bootstrap_toolchain.py` so `lake` is available to the plugin."
         )
     if lean is None:
         next_steps.append(
-            "Run bootstrap_toolchain.py to populate the plugin-local Lean toolchain cache, or install Lean 4 globally so `lean` is available."
+            "Run `python scripts/setup_plugin.py --target verify` or `python scripts/bootstrap_toolchain.py` so `lean` is available to the plugin."
         )
     if payload["proofs_exists"] and not payload["mathlib_source_exists"]:
         next_steps.append(
-            "Run `bootstrap_proofs.py` to populate the shared proofs workspace, fetch mathlib sources, and refresh the package cache."
+            "Run `python scripts/setup_plugin.py --target search` to populate the shared proofs workspace, fetch mathlib sources, and refresh the package cache."
         )
     if payload["proofs_exists"] and payload["mathlib_source_exists"] and not payload["toolchain_compatible"]:
         next_steps.append(
-            "Run `bootstrap_proofs.py` again so it can repair the shared mathlib checkout and repin it to the shared Lean toolchain."
+            "Run `python scripts/setup_plugin.py --target search` again so it can repair the shared mathlib checkout and repin it to the shared Lean toolchain."
         )
     if payload["proofs_exists"] and len(lib_dirs) == 0:
         next_steps.append(
-            "Run `bootstrap_proofs.py` to populate compiled package libraries for the shared proofs workspace."
+            "Run `python scripts/setup_plugin.py --target verify` when you want compiled package libraries for Lean verification."
         )
     if payload["proofs_exists"] and payload["mathlib_source_exists"] and not payload["mathlib_artifact_exists"]:
         next_steps.append(
-            "Run `bootstrap_proofs.py` again so it can fetch or build `Mathlib.olean` for the shared proofs workspace."
+            "Run `python scripts/setup_plugin.py --target verify` to fetch or build `Mathlib.olean` for the shared proofs workspace."
         )
     if payload["proofs_exists"] and not payload["proof_scratch_exists"]:
-        next_steps.append("Run `bootstrap_proofs.py` to recreate `proofs/ProofScratch.lean` in the shared workspace.")
+        next_steps.append("Run `python scripts/setup_plugin.py --target search` to recreate `proofs/ProofScratch.lean` in the shared workspace.")
 
     payload["next_steps"] = next_steps
     return payload
@@ -233,6 +234,7 @@ def print_human(payload: dict[str, object]) -> None:
     print(f"Mathlib.olean: {'present' if payload['mathlib_artifact_exists'] else 'missing'}")
     print(f"lean source files: {payload['lean_source_count']}")
     print(f"compiled library paths: {payload['package_library_path_count']}")
+    print(f"readiness level: {payload['readiness_level']}")
     print(f"ready for search: {payload['ready_for_search']}")
     print(f"ready for lake check: {payload['ready_for_lake_check']}")
     print(f"ready for direct lean: {payload['ready_for_direct_lean']}")

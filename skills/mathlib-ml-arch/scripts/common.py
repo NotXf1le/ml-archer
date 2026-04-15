@@ -583,6 +583,7 @@ def proofs_workspace_status(root: Path | None) -> dict[str, object]:
             "package_library_path_count": 0,
             "ready_for_search": False,
             "ready_for_verification": False,
+            "readiness_level": "incomplete",
         }
 
     proofs_dir = root / "proofs"
@@ -615,6 +616,12 @@ def proofs_workspace_status(root: Path | None) -> dict[str, object]:
         and mathlib_artifact_exists
         and len(lib_dirs) > 0
     )
+    if ready_for_verification:
+        readiness_level = "verification-ready"
+    elif ready_for_search:
+        readiness_level = "search-ready"
+    else:
+        readiness_level = "incomplete"
 
     return {
         "workspace_root": str(root),
@@ -632,23 +639,33 @@ def proofs_workspace_status(root: Path | None) -> dict[str, object]:
         "package_library_path_count": len(lib_dirs),
         "ready_for_search": ready_for_search,
         "ready_for_verification": ready_for_verification,
+        "readiness_level": readiness_level,
     }
 
 
-def run_bootstrap_proofs(requested_workspace: Path, timeout_seconds: int = 60) -> dict[str, object]:
+def run_bootstrap_proofs(
+    requested_workspace: Path,
+    timeout_seconds: int = 60,
+    target: str = "search",
+) -> dict[str, object]:
     bootstrap_script = Path(__file__).with_name("bootstrap_proofs.py")
+    command = [
+        sys.executable,
+        str(bootstrap_script),
+        "--workspace",
+        str(requested_workspace),
+        "--scope",
+        "shared",
+        "--target",
+        target,
+        "--timeout-seconds",
+        str(timeout_seconds),
+        "--json",
+    ]
+    if target != "verify":
+        command.append("--skip-verify")
     result = subprocess.run(
-        [
-            sys.executable,
-            str(bootstrap_script),
-            "--workspace",
-            str(requested_workspace),
-            "--scope",
-            "shared",
-            "--timeout-seconds",
-            str(timeout_seconds),
-            "--json",
-        ],
+        command,
         check=False,
         capture_output=True,
         text=True,
@@ -681,7 +698,13 @@ def ensure_shared_proofs_workspace(
     if bool(status.get(ready_key)):
         return root, selected_scope, status, None
 
-    bootstrap_payload = run_bootstrap_proofs(requested_workspace, timeout_seconds=timeout_seconds)
+    # Automatic repair stays on the lightweight search-ready path. Full
+    # verification setup is an explicit opt-in via setup_plugin.py.
+    bootstrap_payload = run_bootstrap_proofs(
+        requested_workspace,
+        timeout_seconds=timeout_seconds,
+        target="search",
+    )
     root, selected_scope = resolve_proofs_workspace(requested_workspace, "shared")
     status = proofs_workspace_status(root)
     return root, selected_scope, status, bootstrap_payload

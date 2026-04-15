@@ -21,7 +21,7 @@ Happy-path demo:
 2. Assign entity signatures and typed interfaces where the design mixes roles.
 3. Run `python scripts/doctor.py` when the local Lean setup is uncertain.
 4. If `doctor.py` reports that `lake` / `lean` are unavailable, run `python scripts/bootstrap_toolchain.py` so the plugin can use a cache-local Lean toolchain.
-5. If the shared proofs workspace is missing and formal checks should be possible, run `python scripts/bootstrap_proofs.py`. That command creates or reuses the shared user-scoped proofs workspace.
+5. If the shared proofs workspace is missing and formal checks should be possible, run `python scripts/setup_plugin.py --target search` first. Use `python scripts/setup_plugin.py --target verify --yes` only when the review really needs full Lean verification artifacts.
 6. Search for shared mathlib evidence before claiming formal support.
 7. Verify candidate theorems with `python scripts/lean_check.py`, and record the exact verification method if fallback verification was used.
 8. Separate each claim into formal support, engineering inference, or empirical gap.

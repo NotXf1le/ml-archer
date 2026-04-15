@@ -106,9 +106,11 @@ class BootstrapProofsTests(unittest.TestCase):
                 workspace=str(workspace),
                 scope="local",
                 proofs_dir="proofs",
+                target="search",
                 name=None,
                 skip_update=False,
                 skip_cache=False,
+                build_mathlib=False,
                 skip_verify=True,
                 timeout_seconds=5,
                 json=True,
@@ -188,9 +190,11 @@ class BootstrapProofsTests(unittest.TestCase):
                 workspace=str(workspace),
                 scope="shared",
                 proofs_dir="proofs",
+                target="search",
                 name=None,
                 skip_update=False,
                 skip_cache=False,
+                build_mathlib=False,
                 skip_verify=True,
                 timeout_seconds=5,
                 json=True,
@@ -289,9 +293,11 @@ class BootstrapProofsTests(unittest.TestCase):
                 workspace=str(workspace),
                 scope="shared",
                 proofs_dir="proofs",
+                target="search",
                 name=None,
                 skip_update=False,
                 skip_cache=False,
+                build_mathlib=False,
                 skip_verify=True,
                 timeout_seconds=5,
                 json=True,
@@ -381,9 +387,11 @@ class BootstrapProofsTests(unittest.TestCase):
                 workspace=str(workspace),
                 scope="shared",
                 proofs_dir="proofs",
+                target="search",
                 name=None,
                 skip_update=False,
                 skip_cache=False,
+                build_mathlib=False,
                 skip_verify=True,
                 timeout_seconds=5,
                 json=True,
@@ -461,7 +469,7 @@ class BootstrapProofsTests(unittest.TestCase):
             step_names = [step["name"] for step in payload["steps"]]
             self.assertEqual(step_names, ["lake update", "lake update (retry)", "lake exe cache get"])
 
-    def test_main_builds_mathlib_when_cache_dirs_exist_but_artifact_is_missing(self) -> None:
+    def test_main_search_target_does_not_build_mathlib_when_artifact_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
             shared_root = workspace / "shared_workspace"
@@ -493,9 +501,93 @@ class BootstrapProofsTests(unittest.TestCase):
                 workspace=str(workspace),
                 scope="shared",
                 proofs_dir="proofs",
+                target="search",
                 name=None,
                 skip_update=False,
                 skip_cache=False,
+                build_mathlib=False,
+                skip_verify=True,
+                timeout_seconds=5,
+                json=True,
+            )
+
+            def fake_run_command(command: list[str], cwd: Path, env: dict[str, str], timeout_seconds: int) -> dict[str, object]:
+                if command[-3:] == ["exe", "cache", "get"]:
+                    return {
+                        "command": command,
+                        "cwd": str(cwd),
+                        "returncode": 0,
+                        "stdout": "cached",
+                        "stderr": "",
+                        "success": True,
+                        "timed_out": False,
+                        "timeout_seconds": timeout_seconds,
+                        "duration_ms": 10,
+                    }
+                raise AssertionError(f"Unexpected bootstrap command: {command}")
+
+            stdout = io.StringIO()
+            with (
+                patch.object(bootstrap_proofs, "parse_args", return_value=args),
+                patch.object(bootstrap_proofs, "find_lake", return_value=workspace / "lake.exe"),
+                patch.object(bootstrap_proofs, "shared_workspace_root", return_value=shared_root),
+                patch.object(bootstrap_proofs, "writability_error", return_value=None),
+                patch.object(
+                    bootstrap_proofs,
+                    "subprocess_env_for_tool",
+                    return_value={"PATH": "", "HOME": str(workspace), "ELAN_HOME": str(workspace / ".elan")},
+                ),
+                patch.object(bootstrap_proofs, "add_git_safe_directories", side_effect=lambda env, directories: env),
+                patch.object(bootstrap_proofs, "run_command", side_effect=fake_run_command),
+                patch("sys.stdout", stdout),
+            ):
+                exit_code = bootstrap_proofs.main()
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(payload["success"])
+            self.assertFalse(payload["postconditions"]["mathlib_artifact_exists"])
+            self.assertEqual(payload["readiness_level"], "search-ready")
+            step_names = [step["name"] for step in payload["steps"]]
+            self.assertEqual(step_names, ["lake exe cache get"])
+
+    def test_main_verify_target_builds_mathlib_when_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            shared_root = workspace / "shared_workspace"
+            proofs_dir = shared_root / "proofs"
+            proofs_dir.mkdir(parents=True)
+            (proofs_dir / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+            (proofs_dir / "lakefile.toml").write_text(
+                '\n'.join(
+                    [
+                        'name = "SharedWorkspaceProofs"',
+                        "",
+                        "[[require]]",
+                        'name = "mathlib"',
+                        'scope = "leanprover-community"',
+                        'rev = "v4.29.0"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            mathlib_dir = proofs_dir / ".lake" / "packages" / "mathlib"
+            lib_dir = mathlib_dir / ".lake" / "build" / "lib" / "lean"
+            lib_dir.mkdir(parents=True)
+            (mathlib_dir / "Mathlib").mkdir(parents=True, exist_ok=True)
+            (mathlib_dir / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+            (proofs_dir / "lake-manifest.json").write_text("{}", encoding="utf-8")
+
+            args = Namespace(
+                workspace=str(workspace),
+                scope="shared",
+                proofs_dir="proofs",
+                target="verify",
+                name=None,
+                skip_update=False,
+                skip_cache=False,
+                build_mathlib=False,
                 skip_verify=True,
                 timeout_seconds=5,
                 json=True,
@@ -550,6 +642,7 @@ class BootstrapProofsTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue(payload["success"])
             self.assertTrue(payload["postconditions"]["mathlib_artifact_exists"])
+            self.assertEqual(payload["readiness_level"], "verification-ready")
             step_names = [step["name"] for step in payload["steps"]]
             self.assertEqual(step_names, ["lake exe cache get", "lake build Mathlib"])
 

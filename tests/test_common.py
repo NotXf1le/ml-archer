@@ -45,6 +45,7 @@ class CommonTests(unittest.TestCase):
             self.assertTrue(status["ready_for_search"])
             self.assertTrue(status["toolchain_compatible"])
             self.assertTrue(status["ready_for_verification"])
+            self.assertEqual(status["readiness_level"], "verification-ready")
 
     def test_proofs_workspace_status_requires_mathlib_artifact_for_verification(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -64,6 +65,7 @@ class CommonTests(unittest.TestCase):
             self.assertTrue(status["ready_for_search"])
             self.assertFalse(status["mathlib_artifact_exists"])
             self.assertFalse(status["ready_for_verification"])
+            self.assertEqual(status["readiness_level"], "search-ready")
 
     def test_proofs_workspace_status_marks_toolchain_mismatch_not_ready_for_verification(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -101,6 +103,7 @@ class CommonTests(unittest.TestCase):
             self.assertFalse(status["mathlib_source_exists"])
             self.assertFalse(status["ready_for_search"])
             self.assertFalse(status["ready_for_verification"])
+            self.assertEqual(status["readiness_level"], "incomplete")
 
     def test_ensure_shared_proofs_workspace_runs_bootstrap_for_partial_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -186,6 +189,24 @@ class CommonTests(unittest.TestCase):
                 resolved = common.find_lake()
 
             self.assertEqual(resolved, host_lake.resolve())
+
+    def test_run_bootstrap_proofs_defaults_to_lightweight_search_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+
+            class Result:
+                returncode = 0
+                stdout = "{}"
+                stderr = ""
+
+            with patch("common.subprocess.run", return_value=Result()) as run_mock:
+                payload = common.run_bootstrap_proofs(workspace, timeout_seconds=42)
+
+            command = run_mock.call_args.args[0]
+            self.assertIn("--target", command)
+            self.assertIn("search", command)
+            self.assertIn("--skip-verify", command)
+            self.assertEqual(payload["bootstrap_exit_code"], 0)
 
     def test_subprocess_env_uses_plugin_cached_roots_for_cached_toolchain_binary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
