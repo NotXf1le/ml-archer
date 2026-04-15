@@ -1,6 +1,0 @@
-interface:
-  display_name: "Mathlib ML Architect"
-  short_description: "Ground ML architecture claims in Lean/mathlib evidence"
-  default_prompt: "Use $mathlib-ml-arch to evaluate this ML architecture and separate formal support, engineering inference, and empirical gaps."
-policy:
-  allow_implicit_invocation: true

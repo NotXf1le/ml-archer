@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import io
 import json
@@ -12,9 +12,9 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 
-SKILL_SCRIPT_DIR = Path(__file__).resolve().parents[1] / "skills" / "mathlib-ml-arch" / "scripts"
-if str(SKILL_SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SKILL_SCRIPT_DIR))
+ROOT_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
+if str(ROOT_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_SCRIPTS_DIR))
 
 import setup_plugin  # noqa: E402
 
@@ -172,3 +172,4 @@ class SetupPluginTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

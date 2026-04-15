@@ -1,165 +1,61 @@
-# Mathlib ML Architect Plugin
+﻿# Mathlib ML Architect Plugin
 
-Stops Codex from laundering engineering guesses into fake mathematical support.
+This plugin does one job: keep ML architecture reviews honest about what is
+formally verified in Lean/mathlib, what is only engineering inference, and what
+remains empirical or unavailable for formal verification in the current
+workspace.
 
-This plugin forces one separation every serious ML architecture review needs:
+## Official Flow
 
-- what Lean/mathlib actually supports
-- what is only an engineering inference
-- what still depends on benchmarks, papers, data, or systems behavior
+1. Inspect readiness:
 
-## Happy Path
+   ```bash
+   python scripts/doctor.py
+   ```
 
-After installing the plugin, run one explicit demo command:
+2. Prepare the shared workspace:
 
-```bash
-python scripts/review_architecture.py --demo --output-dir reports/mathlib_ml_arch_demo
-```
+   ```bash
+   python scripts/setup_plugin.py --target search
+   python scripts/setup_plugin.py --target verify --yes
+   ```
 
-That command gives you one end-to-end artifact bundle:
+3. Search candidate facts and verify the exact Lean claim you want to cite:
 
-- `report.md`
-- `evidence.json`
+   ```bash
+   python scripts/search_mathlib.py "<query>"
+   python scripts/lean_check.py --json
+   ```
 
-It also validates the bundle directly and surfaces one verified theorem plus one
-unsupported boundary from the shipped sample architecture review.
+4. Validate the final review bundle:
 
-## Canonical CLI Surface
+   ```bash
+   python scripts/validate_artifact_bundle.py --bundle-dir <dir>
+   ```
 
-All public runnable entrypoints live in root `scripts/`:
+## Supported Product Surface
 
-- `python scripts/review_architecture.py --demo --output-dir <dir>`
-- `python scripts/validate_artifact_bundle.py --bundle-dir <dir>`
-- `python scripts/doctor.py`
-- `python scripts/setup_plugin.py --target search`
-- `python scripts/bootstrap_toolchain.py`
-- `python scripts/bootstrap_proofs.py`
-- `python scripts/search_mathlib.py "<query>"`
-- `python scripts/lean_check.py`
-- `python scripts/eml_normalize.py --formula "<expr>"`
-- `python scripts/eml_verify.py --formula "<expr>"`
-- `python scripts/boundary_classify.py --formula "<expr>"`
+- `scripts/doctor.py`
+- `scripts/setup_plugin.py`
+- `scripts/search_mathlib.py`
+- `scripts/lean_check.py`
+- `scripts/validate_artifact_bundle.py`
+- `references/architecture_contract.md`
+- `references/mathlib_scope.md`
+- `skills/mathlib-ml-arch/SKILL.md`
 
-The `skills/mathlib-ml-arch/scripts/` directory is implementation detail for the
-skill bundle. README, command docs, and the skill now all point back to root
-`scripts/` as the canonical launch surface.
+Low-level repair helpers such as `bootstrap_toolchain.py` and
+`bootstrap_proofs.py` remain available for advanced/manual recovery, but they
+are not the primary entry path.
 
-## EML Formula Pipeline
+## What This Plugin Does Not Do
 
-The plugin now ships a conservative scalar formula pipeline that sits beside the
-existing bootstrap/search/check flow:
+- It does not present a fixture replay as a live architecture audit.
+- It does not label a claim as formal support when Lean verification was not obtained.
+- It does not ship the EML/formula tooling as part of the supported product surface.
 
-- Parse one explicit formula into CalcLang v1
-- Desugar supported shorthands such as `sigmoid` and `tanh`
-- Normalize the formula deterministically
-- Extract typed side conditions (`domain`, `branch`, `totalization`)
-- Attempt pure-EML compilation for the currently shipped exact subset `{1, var, exp}`
-- Generate a shared scratch Lean file, `report.md`, `evidence.json`, and Mermaid figures
+## Example Only
 
-The current EML witness library is intentionally honest: parsing and boundary
-classification cover scalar arithmetic, division, logarithm, and square root,
-but exact pure-EML proofs are only shipped for the subset `{1, var, exp}`.
-Unsupported nodes stay explicit in artifacts instead of being silently guessed.
-
-## Review Outcome
-
-For nontrivial reviews, the plugin expects a compact artifact bundle alongside
-the written response:
-
-- `report.md`
-- `evidence.json`
-- `session_log.json` when setup or verification diagnostics matter
-
-Validate bundles explicitly:
-
-```bash
-python scripts/validate_artifact_bundle.py --bundle-dir <dir>
-```
-
-The report order and evidence fields are defined in
-`skills/mathlib-ml-arch/references/architecture_contract.md`.
-
-`evidence.json` records now include:
-
-- `verified_in_lean`
-- `verification_method`
-- `side_conditions`
-
-## Manual Workflow
-
-When you want a live review instead of the shipped demo:
-
-1. Run `python scripts/doctor.py`.
-2. If the environment is not ready, run `python scripts/setup_plugin.py --target search` first. That guided command reuses `doctor.py` diagnostics, asks for confirmation before mutating state, shows staged progress, and prepares the shared user-scoped workspace under `$CODEX_HOME/cache/mathlib-ml-arch/shared_workspace`.
-3. Run `python scripts/setup_plugin.py --target verify --yes` only when you want full Lean verification artifacts (`Mathlib.olean` plus compiled package libraries). The default search setup intentionally stops before the heavyweight `lake build Mathlib` fallback.
-5. Search candidate theorems with `python scripts/search_mathlib.py "<query>"`.
-6. Verify `proofs/ProofScratch.lean` with `python scripts/lean_check.py`.
-7. Search and verification use the shared proofs workspace only. Repo-local `proofs/` directories are ignored as legacy state.
-8. Write `report.md` and `evidence.json`.
-9. Validate the bundle with `python scripts/validate_artifact_bundle.py --bundle-dir <dir>`.
-
-`setup_plugin.py` is now the primary onboarding command. It performs a preflight
-check, reports whether the plugin is `incomplete`, `search-ready`, or
-`verification-ready`, and only runs the required setup phases after explicit
-confirmation or `--yes`.
-
-`bootstrap_proofs.py` remains available as the low-level advanced command. It
-now has an explicit readiness target: `--target search` is the default and does
-not silently fall through to `lake build Mathlib`; `--target verify` is the
-opt-in path for full Lean verification artifacts.
-
-Both commands record the effective `HOME` / `ELAN_HOME`, warnings, and
-postconditions so partial bootstrap progress is easier to diagnose. Repo-local
-`proofs/` directories are detected and surfaced as ignored legacy state instead
-of being used for verification.
-When `search_mathlib.py`, `lean_check.py`, or `eml_verify.py` encounter a
-missing or partial shared workspace, they now attempt shared bootstrap
-automatically before giving up, and surface bootstrap/network diagnostics in
-their JSON output.
-
-`bootstrap_toolchain.py` prefers a plugin-local toolchain cache before the host
-profile. It first reuses any cached `lake` / `lean`, then tries to copy the
-active host toolchain into the plugin cache, and only falls back to `elan
-toolchain install` when the cache still does not contain usable binaries. When
-the shared `$CODEX_HOME/cache/...` root is not writable, both toolchain and
-shared proofs cache locations fall back to a temp cache automatically.
-
-Use `python scripts/setup_plugin.py --target verify --yes --timeout-seconds 900`
-in slow or sandboxed environments when you intentionally want full Lean
-verification setup. If `lake update` or `lake exe cache get` report a
-late-stage cleanup failure but mathlib sources and compiled libraries are
-already present, bootstrap now surfaces that as a warning instead of an opaque
-hard failure.
-
-The setup flow uses staged progress rather than fake byte-level download bars.
-Toolchain install, `lake update`, cache fetch, and optional full mathlib build
-touch the same shared workspace, so real parallel dependency downloads are not
-treated as a supported path.
-
-For formula-specific workflows:
-
-1. Run `python scripts/eml_normalize.py --formula "<expr>"`.
-2. Inspect `artifacts/formula.json`, `artifacts/eml.json`, `figures/eml_tree.mmd`, and `figures/boundary_graph.mmd`.
-3. Run `python scripts/eml_verify.py --formula "<expr>"` when you want a shared, workspace-namespaced scratch proof attempt plus Lean diagnostics.
-4. Use `python scripts/boundary_classify.py --formula "<expr>"` when you only need typed assumptions without a proof attempt.
-
-When `lake env lean` is unavailable but compiled package libraries exist,
-`lean_check.py` falls back to direct `lean` with discovered `LEAN_PATH` and
-records that verification method explicitly.
-
-If the shared user-scoped proofs workspace does not exist, the correct output
-is that formal verification is unavailable until bootstrap is run. Do not blame
-theorem search for that case.
-
-## Hooks
-
-Hooks are experimental and are not part of the first-release success path.
-
-- This plugin does not auto-register hooks in `plugin.json`.
-- `hooks.json` is kept only as an optional acceleration example.
-- Its matcher is set to `Bash`, matching current PostToolUse runtime behavior.
-- Windows users should assume the explicit validation command is the supported path.
-
-Run `python scripts/doctor.py` before setup if you need to confirm whether
-the shared cache is writable or which `HOME` / `ELAN_HOME` the toolchain will
-use.
+`examples/run_demo_review.py` copies the bundled demo bundle from
+`examples/demo-review/` into an output directory and validates it. It is an
+example, not the main review flow.
