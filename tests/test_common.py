@@ -17,6 +17,75 @@ import common  # noqa: E402
 
 
 class CommonTests(unittest.TestCase):
+    @staticmethod
+    def _seed_complete_toolchain(toolchain_root: Path) -> None:
+        bin_dir = toolchain_root / "bin"
+        lib_dir = toolchain_root / "lib" / "lean"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        lib_dir.mkdir(parents=True, exist_ok=True)
+        for name in ["Std.olean", "Lake.olean", "Lean.olean"]:
+            (lib_dir / name).write_text("", encoding="utf-8")
+
+    def test_proofs_workspace_status_accepts_equivalent_toolchain_spelling(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            proofs_dir = root / "proofs"
+            mathlib_dir = proofs_dir / ".lake" / "packages" / "mathlib"
+            lib_dir = mathlib_dir / ".lake" / "build" / "lib" / "lean"
+            lib_dir.mkdir(parents=True)
+            (proofs_dir / "lean-toolchain").write_text("leanprover/lean4:4.29.0", encoding="utf-8")
+            (proofs_dir / "lakefile.toml").write_text("[package]\nname = \"Demo\"\n", encoding="utf-8")
+            (proofs_dir / "ProofScratch.lean").write_text("import Mathlib\n", encoding="utf-8")
+            (mathlib_dir / "Mathlib").mkdir(parents=True, exist_ok=True)
+            (mathlib_dir / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+            (lib_dir / "Mathlib.olean").write_text("", encoding="utf-8")
+
+            status = common.proofs_workspace_status(root)
+
+            self.assertTrue(status["ready_for_search"])
+            self.assertTrue(status["toolchain_compatible"])
+            self.assertTrue(status["ready_for_verification"])
+
+    def test_proofs_workspace_status_requires_mathlib_artifact_for_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            proofs_dir = root / "proofs"
+            mathlib_dir = proofs_dir / ".lake" / "packages" / "mathlib"
+            lib_dir = mathlib_dir / ".lake" / "build" / "lib" / "lean"
+            lib_dir.mkdir(parents=True)
+            (proofs_dir / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+            (proofs_dir / "lakefile.toml").write_text("[package]\nname = \"Demo\"\n", encoding="utf-8")
+            (proofs_dir / "ProofScratch.lean").write_text("import Mathlib\n", encoding="utf-8")
+            (mathlib_dir / "Mathlib").mkdir(parents=True, exist_ok=True)
+            (mathlib_dir / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+
+            status = common.proofs_workspace_status(root)
+
+            self.assertTrue(status["ready_for_search"])
+            self.assertFalse(status["mathlib_artifact_exists"])
+            self.assertFalse(status["ready_for_verification"])
+
+    def test_proofs_workspace_status_marks_toolchain_mismatch_not_ready_for_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            proofs_dir = root / "proofs"
+            mathlib_dir = proofs_dir / ".lake" / "packages" / "mathlib"
+            lib_dir = mathlib_dir / ".lake" / "build" / "lib" / "lean"
+            lib_dir.mkdir(parents=True)
+            (proofs_dir / "lean-toolchain").write_text("leanprover/lean4:4.29.0", encoding="utf-8")
+            (proofs_dir / "lakefile.toml").write_text("[package]\nname = \"Demo\"\n", encoding="utf-8")
+            (proofs_dir / "ProofScratch.lean").write_text("import Mathlib\n", encoding="utf-8")
+            (mathlib_dir / "Mathlib").mkdir(parents=True, exist_ok=True)
+            (mathlib_dir / "lean-toolchain").write_text("leanprover/lean4:v4.30.0-rc1", encoding="utf-8")
+
+            status = common.proofs_workspace_status(root)
+
+            self.assertTrue(status["ready_for_search"])
+            self.assertFalse(status["toolchain_compatible"])
+            self.assertFalse(status["ready_for_verification"])
+            self.assertEqual(status["project_toolchain"], "leanprover/lean4:4.29.0")
+            self.assertEqual(status["mathlib_toolchain"], "leanprover/lean4:v4.30.0-rc1")
+
     def test_proofs_workspace_status_requires_mathlib_sources_for_search(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -86,8 +155,9 @@ class CommonTests(unittest.TestCase):
     def test_find_lake_prefers_plugin_cached_binary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             codex_root = Path(tmp) / ".codex"
-            cached_lake = codex_root / "cache" / common.PLUGIN_SLUG / "toolchains" / "elan" / "toolchains" / "demo" / "bin" / ("lake.exe" if common.WINDOWS else "lake")
-            cached_lake.parent.mkdir(parents=True, exist_ok=True)
+            toolchain_root = codex_root / "cache" / common.PLUGIN_SLUG / "toolchains" / "elan" / "toolchains" / "demo"
+            self._seed_complete_toolchain(toolchain_root)
+            cached_lake = toolchain_root / "bin" / ("lake.exe" if common.WINDOWS else "lake")
             cached_lake.write_text("", encoding="utf-8")
 
             with (
@@ -99,11 +169,30 @@ class CommonTests(unittest.TestCase):
 
             self.assertEqual(resolved, cached_lake.resolve())
 
-    def test_subprocess_env_uses_plugin_cached_roots_for_cached_toolchain_binary(self) -> None:
+    def test_find_lake_skips_incomplete_cached_toolchain(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             codex_root = Path(tmp) / ".codex"
             cached_lake = codex_root / "cache" / common.PLUGIN_SLUG / "toolchains" / "elan" / "toolchains" / "demo" / "bin" / ("lake.exe" if common.WINDOWS else "lake")
             cached_lake.parent.mkdir(parents=True, exist_ok=True)
+            cached_lake.write_text("", encoding="utf-8")
+            host_lake = Path(tmp) / "host-lake.exe"
+            host_lake.write_text("", encoding="utf-8")
+
+            with (
+                patch.object(common, "codex_home", return_value=codex_root),
+                patch("common.shutil.which", return_value=str(host_lake)),
+                patch.object(common, "candidate_user_profiles", return_value=[]),
+            ):
+                resolved = common.find_lake()
+
+            self.assertEqual(resolved, host_lake.resolve())
+
+    def test_subprocess_env_uses_plugin_cached_roots_for_cached_toolchain_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            codex_root = Path(tmp) / ".codex"
+            toolchain_root = codex_root / "cache" / common.PLUGIN_SLUG / "toolchains" / "elan" / "toolchains" / "demo"
+            self._seed_complete_toolchain(toolchain_root)
+            cached_lake = toolchain_root / "bin" / ("lake.exe" if common.WINDOWS else "lake")
             cached_lake.write_text("", encoding="utf-8")
 
             with patch.object(common, "codex_home", return_value=codex_root):
@@ -148,7 +237,7 @@ class CommonTests(unittest.TestCase):
 
             def fake_writability_error(path: str | Path | None) -> str | None:
                 candidate = Path(path) if path is not None else None
-                if candidate is not None and blocked_profile == candidate:
+                if candidate is not None and (candidate == blocked_profile or blocked_profile in candidate.parents):
                     return "PermissionError: denied"
                 return None
 

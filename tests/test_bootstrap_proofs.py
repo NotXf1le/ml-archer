@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import stat
 import sys
 import tempfile
 import unittest
@@ -20,6 +22,38 @@ import bootstrap_proofs  # noqa: E402
 
 
 class BootstrapProofsTests(unittest.TestCase):
+    def test_remove_tree_handles_read_only_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "readonly-tree"
+            child = root / "nested"
+            child.mkdir(parents=True)
+            target = child / "file.txt"
+            target.write_text("x", encoding="utf-8")
+            os.chmod(target, stat.S_IREAD)
+
+            bootstrap_proofs.remove_tree(root)
+
+            self.assertFalse(root.exists())
+
+    def test_expected_mathlib_revision_matches_project_toolchain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proofs_dir = Path(tmp)
+            (proofs_dir / "lean-toolchain").write_text("leanprover/lean4:4.29.0", encoding="utf-8")
+
+            self.assertEqual(bootstrap_proofs.expected_mathlib_revision(proofs_dir), "v4.29.0")
+
+    def test_sync_project_toolchain_normalizes_to_canonical_form(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proofs_dir = Path(tmp)
+            toolchain_path = proofs_dir / "lean-toolchain"
+            toolchain_path.write_text("leanprover/lean4:4.29.0", encoding="utf-8")
+
+            previous, canonical = bootstrap_proofs.sync_project_toolchain(proofs_dir)
+
+            self.assertEqual(previous, "leanprover/lean4:4.29.0")
+            self.assertEqual(canonical, "leanprover/lean4:v4.29.0")
+            self.assertEqual(toolchain_path.read_text(encoding="utf-8").strip(), "leanprover/lean4:v4.29.0")
+
     def test_local_scope_aliases_to_shared_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             requested = Path(tmp)
@@ -61,8 +95,10 @@ class BootstrapProofsTests(unittest.TestCase):
             proofs_dir.mkdir(parents=True)
             (proofs_dir / "lean-toolchain").write_text("leanprover/lean4:stable", encoding="utf-8")
             (proofs_dir / "lakefile.toml").write_text("[package]\nname = \"Demo\"\n", encoding="utf-8")
+            (proofs_dir / "lake-manifest.json").write_text("{}", encoding="utf-8")
             lib_dir = proofs_dir / ".lake" / "packages" / "mathlib" / ".lake" / "build" / "lib" / "lean"
             lib_dir.mkdir(parents=True)
+            (lib_dir / "Mathlib.olean").write_text("", encoding="utf-8")
             mathlib_dir = proofs_dir / ".lake" / "packages" / "mathlib" / "Mathlib"
             mathlib_dir.mkdir(parents=True, exist_ok=True)
 
@@ -120,6 +156,402 @@ class BootstrapProofsTests(unittest.TestCase):
             self.assertEqual(payload["status"], "success")
             self.assertTrue(payload["warnings"])
             self.assertFalse(payload["next_steps"])
+
+    def test_main_repairs_mismatched_mathlib_checkout_and_repins_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            shared_root = workspace / "shared_workspace"
+            proofs_dir = shared_root / "proofs"
+            proofs_dir.mkdir(parents=True)
+            (proofs_dir / "lean-toolchain").write_text("leanprover/lean4:4.29.0", encoding="utf-8")
+            (proofs_dir / "lakefile.toml").write_text(
+                '\n'.join(
+                    [
+                        'name = "SharedWorkspaceProofs"',
+                        "",
+                        "[[require]]",
+                        'name = "mathlib"',
+                        'scope = "leanprover-community"',
+                        'rev = "master"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            stale_mathlib_dir = proofs_dir / ".lake" / "packages" / "mathlib"
+            (stale_mathlib_dir / "Mathlib").mkdir(parents=True)
+            (stale_mathlib_dir / "lean-toolchain").write_text("leanprover/lean4:v4.30.0-rc1", encoding="utf-8")
+            (proofs_dir / "lake-manifest.json").write_text("{}", encoding="utf-8")
+
+            args = Namespace(
+                workspace=str(workspace),
+                scope="shared",
+                proofs_dir="proofs",
+                name=None,
+                skip_update=False,
+                skip_cache=False,
+                skip_verify=True,
+                timeout_seconds=5,
+                json=True,
+            )
+
+            def fake_run_command(command: list[str], cwd: Path, env: dict[str, str], timeout_seconds: int) -> dict[str, object]:
+                if command[-1] == "update":
+                    refreshed_mathlib = proofs_dir / ".lake" / "packages" / "mathlib"
+                    (refreshed_mathlib / "Mathlib").mkdir(parents=True, exist_ok=True)
+                    (refreshed_mathlib / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+                    return {
+                        "command": command,
+                        "cwd": str(cwd),
+                        "returncode": 0,
+                        "stdout": "updated",
+                        "stderr": "",
+                        "success": True,
+                        "timed_out": False,
+                        "timeout_seconds": timeout_seconds,
+                        "duration_ms": 10,
+                    }
+                if command[-3:] == ["exe", "cache", "get"]:
+                    lib_dir = proofs_dir / ".lake" / "packages" / "mathlib" / ".lake" / "build" / "lib" / "lean"
+                    lib_dir.mkdir(parents=True, exist_ok=True)
+                    (lib_dir / "Mathlib.olean").write_text("", encoding="utf-8")
+                    return {
+                        "command": command,
+                        "cwd": str(cwd),
+                        "returncode": 0,
+                        "stdout": "cached",
+                        "stderr": "",
+                        "success": True,
+                        "timed_out": False,
+                        "timeout_seconds": timeout_seconds,
+                        "duration_ms": 10,
+                    }
+                raise AssertionError(f"Unexpected bootstrap command: {command}")
+
+            stdout = io.StringIO()
+            with (
+                patch.object(bootstrap_proofs, "parse_args", return_value=args),
+                patch.object(bootstrap_proofs, "find_lake", return_value=workspace / "lake.exe"),
+                patch.object(bootstrap_proofs, "shared_workspace_root", return_value=shared_root),
+                patch.object(bootstrap_proofs, "writability_error", return_value=None),
+                patch.object(
+                    bootstrap_proofs,
+                    "subprocess_env_for_tool",
+                    return_value={"PATH": "", "HOME": str(workspace), "ELAN_HOME": str(workspace / ".elan")},
+                ),
+                patch.object(bootstrap_proofs, "add_git_safe_directories", side_effect=lambda env, directories: env),
+                patch.object(bootstrap_proofs, "run_command", side_effect=fake_run_command),
+                patch("sys.stdout", stdout),
+            ):
+                exit_code = bootstrap_proofs.main()
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(payload["success"])
+            self.assertEqual(payload["expected_mathlib_revision"], "v4.29.0")
+            self.assertTrue(any("Normalized the shared Lean toolchain" in warning for warning in payload["warnings"]))
+            self.assertTrue(any("Pinned mathlib" in warning for warning in payload["warnings"]))
+            self.assertTrue(any("Removed the cached mathlib checkout" in warning for warning in payload["warnings"]))
+            self.assertTrue((proofs_dir / ".lake" / "packages" / "mathlib" / "Mathlib").exists())
+            self.assertEqual((proofs_dir / "lean-toolchain").read_text(encoding="utf-8").strip(), "leanprover/lean4:v4.29.0")
+            self.assertIn('rev = "v4.29.0"', (proofs_dir / "lakefile.toml").read_text(encoding="utf-8"))
+            self.assertFalse((proofs_dir / "lake-manifest.json").exists())
+            step_names = [step["name"] for step in payload["steps"]]
+            self.assertEqual(step_names, ["lake update", "lake exe cache get"])
+
+    def test_main_runs_update_when_manifest_missing_even_if_mathlib_sources_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            shared_root = workspace / "shared_workspace"
+            proofs_dir = shared_root / "proofs"
+            proofs_dir.mkdir(parents=True)
+            (proofs_dir / "lean-toolchain").write_text("leanprover/lean4:4.29.0", encoding="utf-8")
+            (proofs_dir / "lakefile.toml").write_text(
+                '\n'.join(
+                    [
+                        'name = "SharedWorkspaceProofs"',
+                        "",
+                        "[[require]]",
+                        'name = "mathlib"',
+                        'scope = "leanprover-community"',
+                        'rev = "v4.29.0"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            mathlib_dir = proofs_dir / ".lake" / "packages" / "mathlib"
+            (mathlib_dir / "Mathlib").mkdir(parents=True)
+            (mathlib_dir / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+
+            args = Namespace(
+                workspace=str(workspace),
+                scope="shared",
+                proofs_dir="proofs",
+                name=None,
+                skip_update=False,
+                skip_cache=False,
+                skip_verify=True,
+                timeout_seconds=5,
+                json=True,
+            )
+
+            def fake_run_command(command: list[str], cwd: Path, env: dict[str, str], timeout_seconds: int) -> dict[str, object]:
+                if command[-1] == "update":
+                    (proofs_dir / "lake-manifest.json").write_text("{}", encoding="utf-8")
+                    return {
+                        "command": command,
+                        "cwd": str(cwd),
+                        "returncode": 0,
+                        "stdout": "updated",
+                        "stderr": "",
+                        "success": True,
+                        "timed_out": False,
+                        "timeout_seconds": timeout_seconds,
+                        "duration_ms": 10,
+                    }
+                if command[-3:] == ["exe", "cache", "get"]:
+                    lib_dir = proofs_dir / ".lake" / "packages" / "mathlib" / ".lake" / "build" / "lib" / "lean"
+                    lib_dir.mkdir(parents=True, exist_ok=True)
+                    (lib_dir / "Mathlib.olean").write_text("", encoding="utf-8")
+                    return {
+                        "command": command,
+                        "cwd": str(cwd),
+                        "returncode": 0,
+                        "stdout": "cached",
+                        "stderr": "",
+                        "success": True,
+                        "timed_out": False,
+                        "timeout_seconds": timeout_seconds,
+                        "duration_ms": 10,
+                    }
+                raise AssertionError(f"Unexpected bootstrap command: {command}")
+
+            stdout = io.StringIO()
+            with (
+                patch.object(bootstrap_proofs, "parse_args", return_value=args),
+                patch.object(bootstrap_proofs, "find_lake", return_value=workspace / "lake.exe"),
+                patch.object(bootstrap_proofs, "shared_workspace_root", return_value=shared_root),
+                patch.object(bootstrap_proofs, "writability_error", return_value=None),
+                patch.object(
+                    bootstrap_proofs,
+                    "subprocess_env_for_tool",
+                    return_value={"PATH": "", "HOME": str(workspace), "ELAN_HOME": str(workspace / ".elan")},
+                ),
+                patch.object(bootstrap_proofs, "add_git_safe_directories", side_effect=lambda env, directories: env),
+                patch.object(bootstrap_proofs, "run_command", side_effect=fake_run_command),
+                patch("sys.stdout", stdout),
+            ):
+                exit_code = bootstrap_proofs.main()
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(payload["success"])
+            self.assertTrue((proofs_dir / "lake-manifest.json").exists())
+            step_names = [step["name"] for step in payload["steps"]]
+            self.assertEqual(step_names, ["lake update", "lake exe cache get"])
+
+    def test_main_retries_update_after_package_state_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            shared_root = workspace / "shared_workspace"
+            proofs_dir = shared_root / "proofs"
+            proofs_dir.mkdir(parents=True)
+            (proofs_dir / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+            (proofs_dir / "lakefile.toml").write_text(
+                '\n'.join(
+                    [
+                        'name = "SharedWorkspaceProofs"',
+                        "",
+                        "[[require]]",
+                        'name = "mathlib"',
+                        'scope = "leanprover-community"',
+                        'rev = "v4.29.0"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            stale_mathlib = proofs_dir / ".lake" / "packages" / "mathlib"
+            (stale_mathlib / "Mathlib").mkdir(parents=True)
+            (stale_mathlib / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+
+            args = Namespace(
+                workspace=str(workspace),
+                scope="shared",
+                proofs_dir="proofs",
+                name=None,
+                skip_update=False,
+                skip_cache=False,
+                skip_verify=True,
+                timeout_seconds=5,
+                json=True,
+            )
+            call_count = {"update": 0}
+
+            def fake_run_command(command: list[str], cwd: Path, env: dict[str, str], timeout_seconds: int) -> dict[str, object]:
+                if command[-1] == "update":
+                    call_count["update"] += 1
+                    if call_count["update"] == 1:
+                        return {
+                            "command": command,
+                            "cwd": str(cwd),
+                            "returncode": 1,
+                            "stdout": "",
+                            "stderr": "package configuration has errors",
+                            "success": False,
+                            "timed_out": False,
+                            "timeout_seconds": timeout_seconds,
+                            "duration_ms": 10,
+                        }
+                    refreshed_mathlib = proofs_dir / ".lake" / "packages" / "mathlib"
+                    (refreshed_mathlib / "Mathlib").mkdir(parents=True, exist_ok=True)
+                    (refreshed_mathlib / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+                    (proofs_dir / "lake-manifest.json").write_text("{}", encoding="utf-8")
+                    return {
+                        "command": command,
+                        "cwd": str(cwd),
+                        "returncode": 0,
+                        "stdout": "updated",
+                        "stderr": "",
+                        "success": True,
+                        "timed_out": False,
+                        "timeout_seconds": timeout_seconds,
+                        "duration_ms": 10,
+                    }
+                if command[-3:] == ["exe", "cache", "get"]:
+                    lib_dir = proofs_dir / ".lake" / "packages" / "mathlib" / ".lake" / "build" / "lib" / "lean"
+                    lib_dir.mkdir(parents=True, exist_ok=True)
+                    (lib_dir / "Mathlib.olean").write_text("", encoding="utf-8")
+                    return {
+                        "command": command,
+                        "cwd": str(cwd),
+                        "returncode": 0,
+                        "stdout": "cached",
+                        "stderr": "",
+                        "success": True,
+                        "timed_out": False,
+                        "timeout_seconds": timeout_seconds,
+                        "duration_ms": 10,
+                    }
+                raise AssertionError(f"Unexpected bootstrap command: {command}")
+
+            stdout = io.StringIO()
+            with (
+                patch.object(bootstrap_proofs, "parse_args", return_value=args),
+                patch.object(bootstrap_proofs, "find_lake", return_value=workspace / "lake.exe"),
+                patch.object(bootstrap_proofs, "shared_workspace_root", return_value=shared_root),
+                patch.object(bootstrap_proofs, "writability_error", return_value=None),
+                patch.object(
+                    bootstrap_proofs,
+                    "subprocess_env_for_tool",
+                    return_value={"PATH": "", "HOME": str(workspace), "ELAN_HOME": str(workspace / ".elan")},
+                ),
+                patch.object(bootstrap_proofs, "add_git_safe_directories", side_effect=lambda env, directories: env),
+                patch.object(bootstrap_proofs, "run_command", side_effect=fake_run_command),
+                patch("sys.stdout", stdout),
+            ):
+                exit_code = bootstrap_proofs.main()
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(payload["success"])
+            self.assertTrue(any("retried from a fresh clone" in warning for warning in payload["warnings"]))
+            step_names = [step["name"] for step in payload["steps"]]
+            self.assertEqual(step_names, ["lake update", "lake update (retry)", "lake exe cache get"])
+
+    def test_main_builds_mathlib_when_cache_dirs_exist_but_artifact_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            shared_root = workspace / "shared_workspace"
+            proofs_dir = shared_root / "proofs"
+            proofs_dir.mkdir(parents=True)
+            (proofs_dir / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+            (proofs_dir / "lakefile.toml").write_text(
+                '\n'.join(
+                    [
+                        'name = "SharedWorkspaceProofs"',
+                        "",
+                        "[[require]]",
+                        'name = "mathlib"',
+                        'scope = "leanprover-community"',
+                        'rev = "v4.29.0"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            mathlib_dir = proofs_dir / ".lake" / "packages" / "mathlib"
+            lib_dir = mathlib_dir / ".lake" / "build" / "lib" / "lean"
+            lib_dir.mkdir(parents=True)
+            (mathlib_dir / "Mathlib").mkdir(parents=True, exist_ok=True)
+            (mathlib_dir / "lean-toolchain").write_text("leanprover/lean4:v4.29.0", encoding="utf-8")
+            (proofs_dir / "lake-manifest.json").write_text("{}", encoding="utf-8")
+
+            args = Namespace(
+                workspace=str(workspace),
+                scope="shared",
+                proofs_dir="proofs",
+                name=None,
+                skip_update=False,
+                skip_cache=False,
+                skip_verify=True,
+                timeout_seconds=5,
+                json=True,
+            )
+
+            def fake_run_command(command: list[str], cwd: Path, env: dict[str, str], timeout_seconds: int) -> dict[str, object]:
+                if command[-3:] == ["exe", "cache", "get"]:
+                    return {
+                        "command": command,
+                        "cwd": str(cwd),
+                        "returncode": 0,
+                        "stdout": "cached",
+                        "stderr": "",
+                        "success": True,
+                        "timed_out": False,
+                        "timeout_seconds": timeout_seconds,
+                        "duration_ms": 10,
+                    }
+                if command[-2:] == ["build", "Mathlib"]:
+                    (lib_dir / "Mathlib.olean").write_text("", encoding="utf-8")
+                    return {
+                        "command": command,
+                        "cwd": str(cwd),
+                        "returncode": 0,
+                        "stdout": "built",
+                        "stderr": "",
+                        "success": True,
+                        "timed_out": False,
+                        "timeout_seconds": timeout_seconds,
+                        "duration_ms": 10,
+                    }
+                raise AssertionError(f"Unexpected bootstrap command: {command}")
+
+            stdout = io.StringIO()
+            with (
+                patch.object(bootstrap_proofs, "parse_args", return_value=args),
+                patch.object(bootstrap_proofs, "find_lake", return_value=workspace / "lake.exe"),
+                patch.object(bootstrap_proofs, "shared_workspace_root", return_value=shared_root),
+                patch.object(bootstrap_proofs, "writability_error", return_value=None),
+                patch.object(
+                    bootstrap_proofs,
+                    "subprocess_env_for_tool",
+                    return_value={"PATH": "", "HOME": str(workspace), "ELAN_HOME": str(workspace / ".elan")},
+                ),
+                patch.object(bootstrap_proofs, "add_git_safe_directories", side_effect=lambda env, directories: env),
+                patch.object(bootstrap_proofs, "run_command", side_effect=fake_run_command),
+                patch("sys.stdout", stdout),
+            ):
+                exit_code = bootstrap_proofs.main()
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(payload["success"])
+            self.assertTrue(payload["postconditions"]["mathlib_artifact_exists"])
+            step_names = [step["name"] for step in payload["steps"]]
+            self.assertEqual(step_names, ["lake exe cache get", "lake build Mathlib"])
 
 
 if __name__ == "__main__":

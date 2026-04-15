@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
+import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -17,6 +21,10 @@ from common import (
     find_lake,
     git_safe_directories_for_proofs,
     is_shared_workspace,
+    mathlib_module_artifact,
+    mathlib_revision_for_toolchain,
+    normalize_lean_toolchain,
+    read_text_if_exists,
     requested_workspace_root,
     shared_workspace_root,
     subprocess_env_for_tool,
@@ -248,6 +256,101 @@ def ensure_scratch_file(path: Path) -> None:
     path.write_text(DEFAULT_SCRATCH, encoding="utf-8")
 
 
+def sync_project_toolchain(proofs_dir: Path) -> tuple[str | None, str | None]:
+    toolchain_path = proofs_dir / "lean-toolchain"
+    current = read_text_if_exists(toolchain_path)
+    normalized = normalize_lean_toolchain(current)
+    if current is None or normalized is None:
+        return current, current
+
+    prefix = "leanprover/lean4"
+    if ":" in current:
+        raw_prefix, _ = current.split(":", 1)
+        prefix = raw_prefix.strip() or prefix
+    canonical = f"{prefix}:{normalized}"
+    if current != canonical:
+        toolchain_path.write_text(f"{canonical}\n", encoding="utf-8")
+    return current, canonical
+
+
+def expected_mathlib_revision(proofs_dir: Path) -> str | None:
+    return mathlib_revision_for_toolchain(read_text_if_exists(proofs_dir / "lean-toolchain"))
+
+
+def sync_mathlib_dependency_revision(proofs_dir: Path) -> tuple[str | None, str | None]:
+    expected_rev = expected_mathlib_revision(proofs_dir)
+    if expected_rev is None:
+        return None, None
+
+    lakefile = proofs_dir / "lakefile.toml"
+    contents = read_text_if_exists(lakefile)
+    if contents is None:
+        return expected_rev, None
+
+    pattern = re.compile(
+        r'(\[\[require\]\]\s*name = "mathlib"\s*scope = "leanprover-community"\s*rev = ")([^"]+)(")',
+        re.MULTILINE,
+    )
+    match = pattern.search(contents)
+    if match is None:
+        return expected_rev, None
+
+    current_rev = match.group(2)
+    if current_rev == expected_rev:
+        return expected_rev, current_rev
+
+    updated = pattern.sub(rf'\1{expected_rev}\3', contents, count=1)
+    lakefile.write_text(updated, encoding="utf-8")
+    return expected_rev, current_rev
+
+
+def incompatible_mathlib_checkout_reason(proofs_dir: Path) -> str | None:
+    mathlib_dir = proofs_dir / ".lake" / "packages" / "mathlib"
+    if not mathlib_dir.exists():
+        return None
+
+    mathlib_source = mathlib_dir / "Mathlib"
+    if not mathlib_source.exists():
+        return "the cached mathlib checkout is incomplete"
+
+    project_toolchain = normalize_lean_toolchain(read_text_if_exists(proofs_dir / "lean-toolchain"))
+    mathlib_toolchain = normalize_lean_toolchain(read_text_if_exists(mathlib_dir / "lean-toolchain"))
+    if project_toolchain and mathlib_toolchain and project_toolchain != mathlib_toolchain:
+        return (
+            f"mathlib requires Lean {mathlib_toolchain} but the shared proofs project is pinned to Lean {project_toolchain}"
+        )
+
+    return None
+
+
+def remove_tree(path: Path) -> None:
+    def onerror(func: object, target: str, exc_info: tuple[object, object, object]) -> None:
+        if not os.path.exists(target):
+            return
+        os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+        func(target)
+
+    shutil.rmtree(path, onerror=onerror)
+
+
+def repair_mathlib_checkout(proofs_dir: Path) -> str | None:
+    reason = incompatible_mathlib_checkout_reason(proofs_dir)
+    if reason is None:
+        return None
+
+    reset_mathlib_checkout(proofs_dir)
+    return reason
+
+
+def reset_mathlib_checkout(proofs_dir: Path) -> None:
+    mathlib_dir = proofs_dir / ".lake" / "packages" / "mathlib"
+    manifest = proofs_dir / "lake-manifest.json"
+    if mathlib_dir.exists():
+        remove_tree(mathlib_dir)
+    if manifest.exists():
+        manifest.unlink()
+
+
 def partial_project_guidance(proofs_dir: Path) -> str:
     if (proofs_dir / "lakefile.toml").exists() or (proofs_dir / "lake-manifest.json").exists():
         return (
@@ -425,8 +528,68 @@ def main() -> int:
         return 6
     payload["proof_scratch_exists"] = scratch_path.exists()
 
+    try:
+        previous_toolchain, canonical_toolchain = sync_project_toolchain(proofs_dir)
+    except OSError as exc:
+        payload["error"] = f"{type(exc).__name__}: {exc}"
+        append_unique(
+            payload["next_steps"],
+            "Could not update `proofs/lean-toolchain`. Ensure the shared proofs workspace is writable and rerun bootstrap.",
+        )
+        emit_payload(args, payload)
+        return 6
+    toolchain_changed = previous_toolchain is not None and canonical_toolchain is not None and previous_toolchain != canonical_toolchain
+    if toolchain_changed:
+        append_unique(
+            payload["warnings"],
+            f"Normalized the shared Lean toolchain from `{previous_toolchain}` to `{canonical_toolchain}`.",
+        )
+
+    try:
+        expected_rev, previous_rev = sync_mathlib_dependency_revision(proofs_dir)
+    except OSError as exc:
+        payload["error"] = f"{type(exc).__name__}: {exc}"
+        append_unique(
+            payload["next_steps"],
+            "Could not update `proofs/lakefile.toml`. Ensure the shared proofs workspace is writable and rerun bootstrap.",
+        )
+        emit_payload(args, payload)
+        return 6
+    payload["expected_mathlib_revision"] = expected_rev
+    dependency_changed = expected_rev is not None and previous_rev is not None and previous_rev != expected_rev
+    if dependency_changed:
+        append_unique(
+            payload["warnings"],
+            f"Pinned mathlib from `{previous_rev}` to `{expected_rev}` to match the shared Lean toolchain.",
+        )
+
+    try:
+        repaired_mathlib_reason = repair_mathlib_checkout(proofs_dir)
+    except OSError as exc:
+        payload["error"] = f"{type(exc).__name__}: {exc}"
+        append_unique(
+            payload["next_steps"],
+            "Could not clean the incompatible cached mathlib checkout under `proofs/.lake/packages/mathlib`. Ensure the shared proofs workspace is writable and rerun bootstrap.",
+        )
+        emit_payload(args, payload)
+        return 6
+    if repaired_mathlib_reason is not None:
+        append_unique(
+            payload["warnings"],
+            f"Removed the cached mathlib checkout because {repaired_mathlib_reason}.",
+        )
+
     mathlib_source = proofs_dir / ".lake" / "packages" / "mathlib" / "Mathlib"
-    if not args.skip_update and not mathlib_source.exists():
+    manifest_path = proofs_dir / "lake-manifest.json"
+    needs_update = (
+        repaired_mathlib_reason is not None
+        or toolchain_changed
+        or dependency_changed
+        or not mathlib_source.exists()
+        or not manifest_path.exists()
+    )
+    can_attempt_cache = True
+    if not args.skip_update and needs_update:
         update_step = run_command(
             [str(lake), "update"],
             cwd=proofs_dir,
@@ -437,16 +600,47 @@ def main() -> int:
         update_step["reason"] = classify_step_failure(update_step)
         update_step["guidance"] = failure_guidance("lake update", update_step["reason"], selected_scope)
         payload["steps"].append(update_step)
+        if not update_step["success"] and update_step["reason"] == "package_state":
+            try:
+                reset_mathlib_checkout(proofs_dir)
+            except OSError as exc:
+                payload["error"] = f"{type(exc).__name__}: {exc}"
+                append_unique(
+                    payload["next_steps"],
+                    "Could not reset the cached mathlib checkout after `lake update` reported a package-state error.",
+                )
+                emit_payload(args, payload)
+                return 6
+
+            append_unique(
+                payload["warnings"],
+                "`lake update` reported a package-state error; removed the cached mathlib checkout and retried from a fresh clone.",
+            )
+            retry_step = run_command(
+                [str(lake), "update"],
+                cwd=proofs_dir,
+                env=env,
+                timeout_seconds=args.timeout_seconds,
+            )
+            retry_step["name"] = "lake update (retry)"
+            retry_step["reason"] = classify_step_failure(retry_step)
+            retry_step["guidance"] = failure_guidance("lake update", retry_step["reason"], selected_scope)
+            payload["steps"].append(retry_step)
+            update_step = retry_step
+
         if not update_step["success"]:
-            if mathlib_source.exists():
+            if mathlib_source.exists() and manifest_path.exists():
                 update_step["non_fatal"] = True
                 payload["warnings"].append(
-                    f"`lake update` reported {update_step['reason']} but mathlib sources are present, so bootstrap continued."
+                    f"`lake update` reported {update_step['reason']} but mathlib sources and the package manifest are present, so bootstrap continued."
                 )
             else:
+                can_attempt_cache = False
                 append_unique(payload["next_steps"], update_step["guidance"])
 
-    if not args.skip_cache and len(discover_package_lib_dirs(proofs_dir)) == 0:
+    mathlib_artifact = mathlib_module_artifact(proofs_dir)
+    cache_needed = len(discover_package_lib_dirs(proofs_dir)) == 0 or not mathlib_artifact.exists()
+    if can_attempt_cache and not args.skip_cache and cache_needed:
         cache_step = run_command(
             [str(lake), "exe", "cache", "get"],
             cwd=proofs_dir,
@@ -465,6 +659,27 @@ def main() -> int:
                 )
             else:
                 append_unique(payload["next_steps"], cache_step["guidance"])
+
+    mathlib_artifact = mathlib_module_artifact(proofs_dir)
+    if can_attempt_cache and not mathlib_artifact.exists():
+        build_step = run_command(
+            [str(lake), "build", "Mathlib"],
+            cwd=proofs_dir,
+            env=env,
+            timeout_seconds=args.timeout_seconds,
+        )
+        build_step["name"] = "lake build Mathlib"
+        build_step["reason"] = classify_step_failure(build_step)
+        build_step["guidance"] = failure_guidance("lake build Mathlib", build_step["reason"], selected_scope)
+        payload["steps"].append(build_step)
+        if not build_step["success"]:
+            if mathlib_artifact.exists():
+                build_step["non_fatal"] = True
+                payload["warnings"].append(
+                    f"`lake build Mathlib` reported {build_step['reason']} but `Mathlib.olean` is present, so bootstrap continued."
+                )
+            else:
+                append_unique(payload["next_steps"], build_step["guidance"])
 
     if not args.skip_verify:
         lean_check = Path(__file__).with_name("lean_check.py")
@@ -514,6 +729,7 @@ def main() -> int:
     verification_success = bool(payload["verification"].get("success")) if payload["verification"] else args.skip_verify
     payload["postconditions"] = {
         "mathlib_source_exists": mathlib_source.exists(),
+        "mathlib_artifact_exists": mathlib_artifact.exists(),
         "package_library_path_count": len(package_lib_dirs),
         "verification_success": verification_success if not args.skip_verify else None,
     }
@@ -528,12 +744,18 @@ def main() -> int:
             payload["next_steps"],
             "Compiled package libraries are still missing. Run `lake exe cache get` or build the proofs project after `lake update` succeeds.",
         )
+    if not payload["postconditions"]["mathlib_artifact_exists"]:
+        append_unique(
+            payload["next_steps"],
+            "`Mathlib.olean` is still missing under `proofs/.lake/packages/mathlib/.lake/build/lib/lean`. Run `lake build Mathlib` or rerun bootstrap with a larger timeout.",
+        )
 
     payload["success"] = (
         payload["project_initialized"]
         and payload["proof_scratch_exists"]
         and (args.skip_update or payload["postconditions"]["mathlib_source_exists"])
         and (args.skip_cache or payload["postconditions"]["package_library_path_count"] > 0)
+        and payload["postconditions"]["mathlib_artifact_exists"]
         and (args.skip_verify or bool(payload["postconditions"]["verification_success"]))
     )
 

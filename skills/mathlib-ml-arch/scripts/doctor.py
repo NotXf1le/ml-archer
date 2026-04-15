@@ -121,11 +121,15 @@ def build_payload(requested_workspace: Path, scope: str) -> dict[str, object]:
         "selected_workspace_write_error": selected_workspace_write_error,
         "proofs_dir": str(proofs_dir),
         "proofs_exists": proofs_dir.is_dir(),
+        "project_toolchain": workspace_status["project_toolchain"],
+        "mathlib_toolchain": workspace_status["mathlib_toolchain"],
+        "toolchain_compatible": bool(workspace_status["toolchain_compatible"]),
         "lean_toolchain_exists": (proofs_dir / "lean-toolchain").exists(),
         "lakefile_exists": (proofs_dir / "lakefile.toml").exists(),
         "manifest_exists": (proofs_dir / "lake-manifest.json").exists(),
         "proof_scratch_exists": proof_scratch.exists(),
         "mathlib_source_exists": mathlib_source.exists(),
+        "mathlib_artifact_exists": bool(workspace_status["mathlib_artifact_exists"]),
         "lean_source_count": lean_source_count,
         "package_library_paths": [str(path) for path in lib_dirs],
         "package_library_path_count": len(lib_dirs),
@@ -142,7 +146,7 @@ def build_payload(requested_workspace: Path, scope: str) -> dict[str, object]:
         "tool_home": tool_env.get("HOME"),
         "tool_elan_home": tool_env.get("ELAN_HOME"),
         "ready_for_search": bool(workspace_status["ready_for_search"]),
-        "ready_for_lake_check": bool(workspace_status["ready_for_search"]) and lake is not None and proof_scratch.exists(),
+        "ready_for_lake_check": bool(workspace_status["ready_for_verification"]) and lake is not None and proof_scratch.exists(),
         "ready_for_direct_lean": bool(workspace_status["ready_for_verification"]) and lean is not None,
         "next_steps": [],
     }
@@ -176,9 +180,17 @@ def build_payload(requested_workspace: Path, scope: str) -> dict[str, object]:
         next_steps.append(
             "Run `bootstrap_proofs.py` to populate the shared proofs workspace, fetch mathlib sources, and refresh the package cache."
         )
+    if payload["proofs_exists"] and payload["mathlib_source_exists"] and not payload["toolchain_compatible"]:
+        next_steps.append(
+            "Run `bootstrap_proofs.py` again so it can repair the shared mathlib checkout and repin it to the shared Lean toolchain."
+        )
     if payload["proofs_exists"] and len(lib_dirs) == 0:
         next_steps.append(
             "Run `bootstrap_proofs.py` to populate compiled package libraries for the shared proofs workspace."
+        )
+    if payload["proofs_exists"] and payload["mathlib_source_exists"] and not payload["mathlib_artifact_exists"]:
+        next_steps.append(
+            "Run `bootstrap_proofs.py` again so it can fetch or build `Mathlib.olean` for the shared proofs workspace."
         )
     if payload["proofs_exists"] and not payload["proof_scratch_exists"]:
         next_steps.append("Run `bootstrap_proofs.py` to recreate `proofs/ProofScratch.lean` in the shared workspace.")
@@ -214,7 +226,11 @@ def print_human(payload: dict[str, object]) -> None:
     print(f"codex home: {payload['codex_home']}")
     print(f"tool HOME: {payload.get('tool_home') or 'unset'}")
     print(f"tool ELAN_HOME: {payload.get('tool_elan_home') or 'unset'}")
+    print(f"project toolchain: {payload.get('project_toolchain') or 'missing'}")
+    print(f"mathlib toolchain: {payload.get('mathlib_toolchain') or 'missing'}")
+    print(f"toolchains compatible: {payload['toolchain_compatible']}")
     print(f"mathlib sources: {'present' if payload['mathlib_source_exists'] else 'missing'}")
+    print(f"Mathlib.olean: {'present' if payload['mathlib_artifact_exists'] else 'missing'}")
     print(f"lean source files: {payload['lean_source_count']}")
     print(f"compiled library paths: {payload['package_library_path_count']}")
     print(f"ready for search: {payload['ready_for_search']}")

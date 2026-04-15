@@ -190,23 +190,44 @@ def executable_names(tool_name: str) -> list[str]:
     return [tool_name[:-4] if tool_name.endswith(".exe") else tool_name]
 
 
+def toolchain_root_from_binary(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    normalized = safe_resolve(path)
+    if normalized.parent.name == "bin":
+        return normalized.parent.parent
+    return None
+
+
+def toolchain_is_complete(root: Path | None) -> bool:
+    if root is None:
+        return False
+    lean_lib = root / "lib" / "lean"
+    required = [lean_lib / "Std.olean", lean_lib / "Lake.olean", lean_lib / "Lean.olean"]
+    return all(path.exists() for path in required)
+
+
 def iter_cached_tool_candidates(tool_name: str, plugin_slug: str = PLUGIN_SLUG) -> list[Path]:
     names = executable_names(tool_name)
     candidates: list[Path] = []
     seen: set[Path] = set()
 
-    for elan_home in cached_elan_homes(plugin_slug):
-        for name in names:
-            proxy = safe_resolve(elan_home / "bin" / name)
-            if proxy.exists() and proxy not in seen:
-                candidates.append(proxy)
-                seen.add(proxy)
+    if tool_name == "elan":
+        for elan_home in cached_elan_homes(plugin_slug):
+            for name in names:
+                proxy = safe_resolve(elan_home / "bin" / name)
+                if proxy.exists() and proxy not in seen:
+                    candidates.append(proxy)
+                    seen.add(proxy)
 
+    for elan_home in cached_elan_homes(plugin_slug):
         toolchains_dir = elan_home / "toolchains"
         if not toolchains_dir.exists():
             continue
 
         for toolchain_dir in sorted(path for path in toolchains_dir.iterdir() if path.is_dir()):
+            if not toolchain_is_complete(toolchain_dir):
+                continue
             for name in names:
                 candidate = safe_resolve(toolchain_dir / "bin" / name)
                 if candidate.exists() and candidate not in seen:
@@ -420,14 +441,16 @@ def subprocess_env_for_tool(tool: Path | None = None) -> dict[str, str]:
     if profile is not None:
         preferred_home = safe_resolve(profile)
         desired_elan_home = inferred_elan_home or normalize_path(env.get("ELAN_HOME")) or preferred_home / ".elan"
-        if desired_elan_home is not None and path_contains(desired_elan_home, preferred_home) and writability_error(preferred_home) is not None:
-            desired_elan_home = None
+        fallback_home, fallback_elan_home = resolve_fallback_tool_homes(None)
+        effective_home = preferred_home if writability_error(preferred_home) is None else fallback_home
 
-        if writability_error(preferred_home) is None and desired_elan_home is not None and prepare_writable_directory(desired_elan_home):
-            effective_home = preferred_home
+        effective_elan_home: Path
+        if desired_elan_home is not None and desired_elan_home.exists():
+            effective_elan_home = desired_elan_home
+        elif desired_elan_home is not None and writability_error(desired_elan_home) is None and prepare_writable_directory(desired_elan_home):
             effective_elan_home = desired_elan_home
         else:
-            effective_home, effective_elan_home = resolve_fallback_tool_homes(desired_elan_home)
+            effective_elan_home = fallback_elan_home
 
         env["USERPROFILE"] = str(effective_home)
         env["HOME"] = str(effective_home)
@@ -504,16 +527,58 @@ def build_lean_path(proofs_dir: Path) -> str:
     return os.pathsep.join(str(path) for path in discover_package_lib_dirs(proofs_dir))
 
 
+def mathlib_module_artifact(proofs_dir: Path) -> Path:
+    return proofs_dir / ".lake" / "packages" / "mathlib" / ".lake" / "build" / "lib" / "lean" / "Mathlib.olean"
+
+
+def read_text_if_exists(path: Path) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    stripped = text.strip()
+    return stripped or None
+
+
+def normalize_lean_toolchain(value: str | None) -> str | None:
+    if not value:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    if ":" in stripped:
+        _, stripped = stripped.split(":", 1)
+        stripped = stripped.strip()
+    if not stripped:
+        return None
+    if stripped in {"stable", "nightly"} or stripped.startswith("nightly-"):
+        return stripped
+    return stripped if stripped.startswith("v") else f"v{stripped}"
+
+
+def mathlib_revision_for_toolchain(value: str | None) -> str | None:
+    normalized = normalize_lean_toolchain(value)
+    if normalized is None:
+        return None
+    if normalized in {"stable", "nightly"}:
+        return None
+    return normalized
+
+
 def proofs_workspace_status(root: Path | None) -> dict[str, object]:
     if root is None:
         return {
             "workspace_root": None,
             "proofs_dir": None,
             "proofs_exists": False,
+            "project_toolchain": None,
+            "mathlib_toolchain": None,
+            "toolchain_compatible": False,
             "lean_toolchain_exists": False,
             "lakefile_exists": False,
             "proof_scratch_exists": False,
             "mathlib_source_exists": False,
+            "mathlib_artifact_exists": False,
             "package_library_paths": [],
             "package_library_path_count": 0,
             "ready_for_search": False,
@@ -523,18 +588,31 @@ def proofs_workspace_status(root: Path | None) -> dict[str, object]:
     proofs_dir = root / "proofs"
     proof_scratch = proofs_dir / "ProofScratch.lean"
     mathlib_source = proofs_dir / ".lake" / "packages" / "mathlib" / "Mathlib"
+    project_toolchain = read_text_if_exists(proofs_dir / "lean-toolchain")
+    mathlib_toolchain = read_text_if_exists(proofs_dir / ".lake" / "packages" / "mathlib" / "lean-toolchain")
+    normalized_project_toolchain = normalize_lean_toolchain(project_toolchain)
+    normalized_mathlib_toolchain = normalize_lean_toolchain(mathlib_toolchain)
     lib_dirs = discover_package_lib_dirs(proofs_dir) if proofs_dir.exists() else []
     proofs_exists = proofs_dir.is_dir()
     lean_toolchain_exists = (proofs_dir / "lean-toolchain").exists()
     lakefile_exists = (proofs_dir / "lakefile.toml").exists()
     proof_scratch_exists = proof_scratch.exists()
     mathlib_source_exists = mathlib_source.exists()
+    mathlib_artifact_exists = mathlib_module_artifact(proofs_dir).exists()
+    toolchain_compatible = (
+        mathlib_source_exists
+        and normalized_project_toolchain is not None
+        and normalized_mathlib_toolchain is not None
+        and normalized_project_toolchain == normalized_mathlib_toolchain
+    )
     ready_for_search = proofs_exists and mathlib_source_exists
     ready_for_verification = (
         ready_for_search
+        and toolchain_compatible
         and lean_toolchain_exists
         and lakefile_exists
         and proof_scratch_exists
+        and mathlib_artifact_exists
         and len(lib_dirs) > 0
     )
 
@@ -542,10 +620,14 @@ def proofs_workspace_status(root: Path | None) -> dict[str, object]:
         "workspace_root": str(root),
         "proofs_dir": str(proofs_dir),
         "proofs_exists": proofs_exists,
+        "project_toolchain": project_toolchain,
+        "mathlib_toolchain": mathlib_toolchain,
+        "toolchain_compatible": toolchain_compatible,
         "lean_toolchain_exists": lean_toolchain_exists,
         "lakefile_exists": lakefile_exists,
         "proof_scratch_exists": proof_scratch_exists,
         "mathlib_source_exists": mathlib_source_exists,
+        "mathlib_artifact_exists": mathlib_artifact_exists,
         "package_library_paths": [str(path) for path in lib_dirs],
         "package_library_path_count": len(lib_dirs),
         "ready_for_search": ready_for_search,
