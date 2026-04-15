@@ -20,13 +20,14 @@ Happy-path demo:
 1. Inventory the important internal variables, modules, and state.
 2. Assign entity signatures and typed interfaces where the design mixes roles.
 3. Run `python scripts/doctor.py` when the local Lean setup is uncertain.
-4. If the target workspace has no repo-local `proofs/` project and formal checks should be possible, run `python scripts/bootstrap_proofs.py`. That command reuses or creates the shared user-scoped proofs workspace unless the repo explicitly needs `--scope local`.
-5. Search for local or shared mathlib evidence before claiming formal support.
-6. Verify candidate theorems with `python scripts/lean_check.py`, and record the exact verification method if fallback verification was used.
-7. Separate each claim into formal support, engineering inference, or empirical gap.
-8. Emit the artifact bundle required by the skill contract.
-9. Validate the bundle explicitly with `python scripts/validate_artifact_bundle.py --bundle-dir <dir>`.
-10. When the audit depends on one explicit scalar formula, prefer the EML helpers first:
+4. If `doctor.py` reports that `lake` / `lean` are unavailable, run `python scripts/bootstrap_toolchain.py` so the plugin can use a cache-local Lean toolchain.
+5. If the target workspace has no repo-local `proofs/` project and formal checks should be possible, run `python scripts/bootstrap_proofs.py`. That command reuses or creates the shared user-scoped proofs workspace unless the repo explicitly needs `--scope local`.
+6. Search for local or shared mathlib evidence before claiming formal support.
+7. Verify candidate theorems with `python scripts/lean_check.py`, and record the exact verification method if fallback verification was used.
+8. Separate each claim into formal support, engineering inference, or empirical gap.
+9. Emit the artifact bundle required by the skill contract.
+10. Validate the bundle explicitly with `python scripts/validate_artifact_bundle.py --bundle-dir <dir>`.
+11. When the audit depends on one explicit scalar formula, prefer the EML helpers first:
     - `python scripts/eml_normalize.py --formula "<expr>"`
     - `python scripts/eml_verify.py --formula "<expr>"`
     - `python scripts/boundary_classify.py --formula "<expr>"`

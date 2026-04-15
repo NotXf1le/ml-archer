@@ -31,6 +31,7 @@ All public runnable entrypoints live in root `scripts/`:
 - `python scripts/review_architecture.py --demo --output-dir <dir>`
 - `python scripts/validate_artifact_bundle.py --bundle-dir <dir>`
 - `python scripts/doctor.py`
+- `python scripts/bootstrap_toolchain.py`
 - `python scripts/bootstrap_proofs.py`
 - `python scripts/search_mathlib.py "<query>"`
 - `python scripts/lean_check.py`
@@ -88,13 +89,33 @@ The report order and evidence fields are defined in
 When you want a live review instead of the shipped demo:
 
 1. Run `python scripts/doctor.py`.
-2. If this repo needs its own Lean project, run `python scripts/bootstrap_proofs.py --scope local`.
-3. Otherwise run `python scripts/bootstrap_proofs.py` and let it create or reuse the shared user-scoped proofs workspace under `$CODEX_HOME/cache/mathlib-ml-arch/shared_workspace`.
-4. Search candidate theorems with `python scripts/search_mathlib.py "<query>"`.
-5. Verify `proofs/ProofScratch.lean` with `python scripts/lean_check.py`.
-6. Both search and verification prefer a repo-local `proofs/` project when one exists and otherwise fall back to the shared workspace automatically.
-7. Write `report.md` and `evidence.json`.
-8. Validate the bundle with `python scripts/validate_artifact_bundle.py --bundle-dir <dir>`.
+2. If `doctor.py` reports that `lake` / `lean` are missing, run `python scripts/bootstrap_toolchain.py` first. That command populates the plugin-local toolchain cache under `$CODEX_HOME/cache/mathlib-ml-arch/toolchains` and falls back to a temp cache when the shared CODEX_HOME root is not writable.
+3. If this repo needs its own Lean project, run `python scripts/bootstrap_proofs.py --scope local`.
+4. Otherwise run `python scripts/bootstrap_proofs.py` and let it create or reuse the shared user-scoped proofs workspace under `$CODEX_HOME/cache/mathlib-ml-arch/shared_workspace`.
+5. Search candidate theorems with `python scripts/search_mathlib.py "<query>"`.
+6. Verify `proofs/ProofScratch.lean` with `python scripts/lean_check.py`.
+7. Both search and verification prefer a repo-local `proofs/` project when one exists and otherwise fall back to the shared workspace automatically.
+8. Write `report.md` and `evidence.json`.
+9. Validate the bundle with `python scripts/validate_artifact_bundle.py --bundle-dir <dir>`.
+
+`bootstrap_proofs.py` now performs explicit writability checks before creating a
+shared workspace. In `--scope auto`, it falls back to the requested local
+workspace when the shared CODEX_HOME cache is not writable. The JSON payload and
+human output both record the effective `HOME` / `ELAN_HOME`, warnings, and
+postconditions so partial bootstrap progress is easier to diagnose.
+
+`bootstrap_toolchain.py` prefers a plugin-local toolchain cache before the host
+profile. It first reuses any cached `lake` / `lean`, then tries to copy the
+active host toolchain into the plugin cache, and only falls back to `elan
+toolchain install` when the cache still does not contain usable binaries. When
+the shared `$CODEX_HOME/cache/...` root is not writable, both toolchain and
+shared proofs cache locations fall back to a temp cache automatically.
+
+Use `python scripts/bootstrap_proofs.py --timeout-seconds 600` in slow or
+sandboxed environments. If `lake update` or `lake exe cache get` report a
+late-stage cleanup failure but mathlib sources and compiled libraries are
+already present, bootstrap now surfaces that as a warning instead of an opaque
+hard failure.
 
 For formula-specific workflows:
 
@@ -119,3 +140,7 @@ Hooks are experimental and are not part of the first-release success path.
 - `hooks.json` is kept only as an optional acceleration example.
 - Its matcher is set to `Bash`, matching current PostToolUse runtime behavior.
 - Windows users should assume the explicit validation command is the supported path.
+
+Run `python scripts/doctor.py` before bootstrap if you need to confirm whether
+the shared cache is writable or which `HOME` / `ELAN_HOME` the toolchain will
+use.

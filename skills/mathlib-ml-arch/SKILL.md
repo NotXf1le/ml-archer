@@ -29,7 +29,13 @@ python "../../scripts/boundary_classify.py" --formula "<expr>"
 python "../../scripts/doctor.py"
 ```
 
-6. If the repo has no usable `proofs/` project and formal checks should be possible, bootstrap before searching:
+6. If `doctor.py` reports that `lake` or `lean` are unavailable, bootstrap the plugin-local toolchain cache before continuing:
+
+```bash
+python "../../scripts/bootstrap_toolchain.py"
+```
+
+7. If the repo has no usable `proofs/` project and formal checks should be possible, bootstrap before searching:
 
 ```bash
 python "../../scripts/bootstrap_proofs.py"
@@ -45,7 +51,7 @@ python "../../scripts/bootstrap_proofs.py" --scope local
 
 If bootstrap is not possible in the current environment, say that formal verification is unavailable here.
 
-7. Search local or shared evidence before making formal claims:
+8. Search local or shared evidence before making formal claims:
 
 ```bash
 python "../../scripts/search_mathlib.py" "<query>"
@@ -53,7 +59,7 @@ python "../../scripts/search_mathlib.py" "<query>"
 
 Use `--json` when you want machine-readable theorem candidates with names, import paths, and locations.
 
-8. Validate candidate theorems in `proofs/ProofScratch.lean` before citing them as formal support:
+9. Validate candidate theorems in `proofs/ProofScratch.lean` before citing them as formal support:
 
 ```bash
 python "../../scripts/lean_check.py"
@@ -61,20 +67,20 @@ python "../../scripts/lean_check.py"
 
 The result counts as verified only when `lean_check.py` succeeds. If it falls back from `lake env lean` to direct `lean` with `LEAN_PATH`, record that verification method explicitly.
 
-9. Write the response in this order:
+10. Write the response in this order:
    - Proposed architecture
    - Formal evidence from mathlib
    - Engineering inference built on top of formal facts
    - Gaps requiring benchmarks or papers
    - Risks
 
-10. For nontrivial requests, emit the artifact bundle defined in `references/architecture_contract.md`:
+11. For nontrivial requests, emit the artifact bundle defined in `references/architecture_contract.md`:
    - `report.md`
    - `evidence.json`
    - `session_log.json` when bootstrap or verification diagnostics matter
 
    Keep the bundle consistent with the written response.
-11. Validate the artifact bundle explicitly:
+12. Validate the artifact bundle explicitly:
 
 ```bash
 python "../../scripts/validate_artifact_bundle.py" --bundle-dir "<dir>"
@@ -106,6 +112,7 @@ For each cited theorem or definition, record:
 - `references/mathlib_scope.md`: boundaries of what mathlib can and cannot support, plus query ideas and local setup notes.
 - `references/eml_side_conditions.md`: domain, branch, and totalization taxonomy for EML-normalized formulas.
 - `../../scripts/doctor.py`: inspect repo-local and shared Lean/mathlib environments and emit agent-friendly diagnostics.
+- `../../scripts/bootstrap_toolchain.py`: populate a plugin-local Lean/Lake toolchain cache under `CODEX_HOME` so later plugin runs do not depend on the host profile.
 - `../../scripts/bootstrap_proofs.py`: create or reuse a repo-local or shared `proofs/` project, fetch cache when needed, and run a smoke verification pass.
 - `../../scripts/search_mathlib.py`: search the selected repo-local or shared `proofs/` project and any downloaded mathlib checkout for ranked theorem candidates.
 - `../../scripts/lean_check.py`: verify `proofs/ProofScratch.lean` via `lake env lean`, with direct `lean` fallback when the official path is unavailable and command timeouts recorded explicitly.

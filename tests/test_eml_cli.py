@@ -12,7 +12,16 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 
 PLUGIN_ROOT = Path(__file__).parent.parent
-WORKSPACE_ROOT = next(candidate for candidate in [PLUGIN_ROOT.parent.parent, *PLUGIN_ROOT.parents] if (candidate / "proofs").exists())
+
+
+def default_workspace_root() -> Path:
+    for candidate in [PLUGIN_ROOT.parent.parent, *PLUGIN_ROOT.parents]:
+        if (candidate / "proofs").exists():
+            return candidate
+    return PLUGIN_ROOT
+
+
+WORKSPACE_ROOT = default_workspace_root()
 SKILL_SCRIPT_DIR = PLUGIN_ROOT / "skills" / "mathlib-ml-arch" / "scripts"
 if str(SKILL_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SKILL_SCRIPT_DIR))

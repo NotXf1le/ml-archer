@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
+from unittest.mock import patch
 
 
 sys.dont_write_bytecode = True
@@ -13,7 +16,7 @@ ROOT_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(ROOT_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_SCRIPTS_DIR))
 
-from validate_artifact_bundle import validate_evidence, validate_report  # noqa: E402
+from validate_artifact_bundle import resolve_targets, validate_evidence, validate_report  # noqa: E402
 
 
 VALID_REPORT = """## Proposed architecture
@@ -90,6 +93,44 @@ class ValidateArtifactBundleTests(unittest.TestCase):
             evidence_issues, _ = validate_evidence(bundle / "evidence.json")
 
             self.assertTrue(any("Formal support" in issue for issue in evidence_issues))
+
+    def test_latest_resolution_uses_newest_report_across_plugin_and_workspace_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root = root / "plugin"
+            workspace_root = root / "workspace"
+            plugin_bundle = plugin_root / "reports" / "old_bundle"
+            workspace_bundle = workspace_root / "reports" / "latest_bundle"
+            plugin_bundle.mkdir(parents=True)
+            workspace_bundle.mkdir(parents=True)
+
+            plugin_report = plugin_bundle / "report.md"
+            workspace_report = workspace_bundle / "architecture_audit_report_demo.md"
+            plugin_evidence = plugin_bundle / "evidence.json"
+            workspace_evidence = workspace_bundle / "evidence.json"
+
+            plugin_report.write_text(VALID_REPORT, encoding="utf-8")
+            workspace_report.write_text(VALID_REPORT, encoding="utf-8")
+            plugin_evidence.write_text(json.dumps([self.make_record()], indent=2), encoding="utf-8")
+            workspace_evidence.write_text(json.dumps([self.make_record()], indent=2), encoding="utf-8")
+
+            os.utime(plugin_report, (10, 10))
+            os.utime(workspace_report, (20, 20))
+
+            args = Namespace(
+                bundle_dir=None,
+                report=None,
+                evidence=None,
+                latest=True,
+                workspace=str(workspace_root),
+                json=False,
+            )
+
+            with patch("validate_artifact_bundle.plugin_root", return_value=plugin_root):
+                report_path, evidence_path = resolve_targets(args)
+
+            self.assertEqual(report_path, workspace_report.resolve())
+            self.assertEqual(evidence_path, workspace_evidence.resolve())
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 
@@ -35,6 +37,14 @@ def normalize_path(path: str | Path | None) -> Path | None:
     return safe_resolve(Path(path).expanduser())
 
 
+def path_contains(path: Path, root: Path) -> bool:
+    try:
+        safe_resolve(path).relative_to(safe_resolve(root))
+        return True
+    except ValueError:
+        return False
+
+
 def requested_workspace_root(start: str | Path | None = None) -> Path:
     return normalize_path(start) or Path.cwd().resolve()
 
@@ -51,6 +61,41 @@ def infer_workspace_root(start: str | Path | None = None) -> Path:
     return find_existing_proofs_root(start) or requested_workspace_root(start)
 
 
+def existing_parent_for_probe(path: Path) -> Path:
+    candidate = safe_resolve(path)
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return candidate
+
+
+def writability_error(path: str | Path | None) -> str | None:
+    normalized = normalize_path(path)
+    if normalized is None:
+        return "No path was provided."
+
+    probe_root = existing_parent_for_probe(normalized)
+    if not probe_root.exists():
+        return f"No existing parent directory is available for {normalized}."
+
+    target_root = normalized if normalized.exists() and normalized.is_dir() else probe_root
+    probe_dir = target_root / f".codex-write-probe-{os.getpid()}-{time.time_ns()}"
+    try:
+        probe_dir.mkdir()
+    except OSError as exc:
+        return f"{type(exc).__name__}: {exc}"
+
+    try:
+        probe_dir.rmdir()
+    except OSError as exc:
+        return f"{type(exc).__name__}: {exc}"
+
+    return None
+
+
+def is_writable_path(path: str | Path | None) -> bool:
+    return writability_error(path) is None
+
+
 def codex_home() -> Path:
     configured = os.environ.get("CODEX_HOME")
     if configured:
@@ -61,14 +106,123 @@ def codex_home() -> Path:
     return base / ".codex"
 
 
+def shared_workspace_roots(plugin_slug: str = PLUGIN_SLUG) -> list[Path]:
+    roots = [safe_resolve(codex_home() / "cache" / plugin_slug / "shared_workspace")]
+    temp_root = safe_resolve(Path(tempfile.gettempdir()) / "codex" / plugin_slug / "shared_workspace")
+    if temp_root not in roots:
+        roots.append(temp_root)
+    return roots
+
+
 def shared_workspace_root(plugin_slug: str = PLUGIN_SLUG) -> Path:
-    return safe_resolve(codex_home() / "cache" / plugin_slug / "shared_workspace")
+    candidates = shared_workspace_roots(plugin_slug)
+    for candidate in candidates:
+        if (candidate / "proofs").is_dir():
+            return candidate
+    for candidate in candidates:
+        if writability_error(candidate) is None:
+            return candidate
+    return candidates[0]
+
+
+def toolchain_fallback_roots(plugin_slug: str = PLUGIN_SLUG) -> list[Path]:
+    roots = [safe_resolve(codex_home() / "cache" / plugin_slug / "toolchains")]
+    temp_root = safe_resolve(Path(tempfile.gettempdir()) / "codex" / plugin_slug / "toolchains")
+    if temp_root not in roots:
+        roots.append(temp_root)
+    return roots
+
+
+def cached_elan_homes(plugin_slug: str = PLUGIN_SLUG) -> list[Path]:
+    return [safe_resolve(root / "elan") for root in toolchain_fallback_roots(plugin_slug)]
+
+
+def fallback_tool_home(plugin_slug: str = PLUGIN_SLUG) -> Path:
+    return safe_resolve(toolchain_fallback_roots(plugin_slug)[0] / "home")
+
+
+def fallback_elan_home(plugin_slug: str = PLUGIN_SLUG) -> Path:
+    return safe_resolve(toolchain_fallback_roots(plugin_slug)[0] / "elan")
+
+
+def prepare_writable_directory(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+    return writability_error(path) is None
+
+
+def resolve_fallback_tool_homes(
+    configured_elan_home: str | Path | None = None,
+    plugin_slug: str = PLUGIN_SLUG,
+) -> tuple[Path, Path]:
+    configured = normalize_path(configured_elan_home)
+    last_home = fallback_tool_home(plugin_slug)
+    last_elan = configured or fallback_elan_home(plugin_slug)
+
+    for root in toolchain_fallback_roots(plugin_slug):
+        home_candidate = safe_resolve(root / "home")
+        elan_candidate = configured or safe_resolve(root / "elan")
+        if not prepare_writable_directory(home_candidate):
+            last_home, last_elan = home_candidate, elan_candidate
+            continue
+        if configured is not None:
+            if not prepare_writable_directory(configured):
+                last_home, last_elan = home_candidate, configured
+                continue
+            return home_candidate, configured
+        if not prepare_writable_directory(elan_candidate):
+            last_home, last_elan = home_candidate, elan_candidate
+            continue
+        return home_candidate, elan_candidate
+
+    return last_home, last_elan
+
+
+def executable_names(tool_name: str) -> list[str]:
+    if WINDOWS:
+        primary = tool_name if tool_name.endswith(".exe") else f"{tool_name}.exe"
+        secondary = tool_name[:-4] if tool_name.endswith(".exe") else tool_name
+        return [primary] if primary == secondary else [primary, secondary]
+    return [tool_name[:-4] if tool_name.endswith(".exe") else tool_name]
+
+
+def iter_cached_tool_candidates(tool_name: str, plugin_slug: str = PLUGIN_SLUG) -> list[Path]:
+    names = executable_names(tool_name)
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+
+    for elan_home in cached_elan_homes(plugin_slug):
+        for name in names:
+            proxy = safe_resolve(elan_home / "bin" / name)
+            if proxy.exists() and proxy not in seen:
+                candidates.append(proxy)
+                seen.add(proxy)
+
+        toolchains_dir = elan_home / "toolchains"
+        if not toolchains_dir.exists():
+            continue
+
+        for toolchain_dir in sorted(path for path in toolchains_dir.iterdir() if path.is_dir()):
+            for name in names:
+                candidate = safe_resolve(toolchain_dir / "bin" / name)
+                if candidate.exists() and candidate not in seen:
+                    candidates.append(candidate)
+                    seen.add(candidate)
+
+    return candidates
+
+
+def find_cached_tool(tool_name: str, plugin_slug: str = PLUGIN_SLUG) -> Path | None:
+    candidates = iter_cached_tool_candidates(tool_name, plugin_slug)
+    return candidates[0] if candidates else None
 
 
 def find_shared_proofs_root(plugin_slug: str = PLUGIN_SLUG) -> Path | None:
-    root = shared_workspace_root(plugin_slug)
-    if (root / "proofs").is_dir():
-        return root
+    for root in shared_workspace_roots(plugin_slug):
+        if (root / "proofs").is_dir():
+            return root
     return None
 
 
@@ -76,7 +230,7 @@ def is_shared_workspace(root: str | Path | None, plugin_slug: str = PLUGIN_SLUG)
     normalized = normalize_path(root)
     if normalized is None:
         return False
-    return normalized == shared_workspace_root(plugin_slug)
+    return normalized in shared_workspace_roots(plugin_slug)
 
 
 def resolve_proofs_workspace(
@@ -110,6 +264,12 @@ def derive_user_profile_from_tool(tool: Path | None) -> Path | None:
     if tool is None:
         return None
 
+    normalized = safe_resolve(tool)
+    for root in toolchain_fallback_roots():
+        elan_root = safe_resolve(root / "elan")
+        if path_contains(normalized, elan_root):
+            return safe_resolve(root / "home")
+
     parent = tool.parent
     while parent != parent.parent:
         if parent.name.lower() == ".elan":
@@ -118,6 +278,31 @@ def derive_user_profile_from_tool(tool: Path | None) -> Path | None:
 
     user_profile = os.environ.get("USERPROFILE") or os.environ.get("HOME")
     return safe_resolve(Path(user_profile).expanduser()) if user_profile else None
+
+
+def derive_elan_home_from_tool(tool: Path | None) -> Path | None:
+    if tool is None:
+        return None
+
+    normalized = safe_resolve(tool)
+    for elan_root in cached_elan_homes():
+        if path_contains(normalized, elan_root):
+            return elan_root
+
+    parent = normalized.parent
+    while parent != parent.parent:
+        if parent.name.lower() == ".elan":
+            return parent
+        parent = parent.parent
+
+    configured = os.environ.get("ELAN_HOME")
+    if configured:
+        return safe_resolve(Path(configured).expanduser())
+
+    profile = derive_user_profile_from_tool(tool)
+    if profile is None:
+        return None
+    return safe_resolve(profile / ".elan")
 
 
 def candidate_user_profiles() -> list[Path]:
@@ -166,7 +351,31 @@ def _winget_tool_candidates(tool_name: str) -> list[Path]:
     return matches
 
 
+def find_elan() -> Path | None:
+    cached = find_cached_tool("elan")
+    if cached is not None:
+        return cached
+
+    names = executable_names("elan")
+    for name in names:
+        hit = shutil.which(name)
+        if hit:
+            return Path(hit).resolve()
+
+    relative = Path(".elan/bin/elan.exe" if WINDOWS else ".elan/bin/elan")
+    for profile in candidate_user_profiles():
+        candidate = profile / relative
+        if candidate.exists():
+            return candidate.resolve()
+
+    return None
+
+
 def find_lake() -> Path | None:
+    cached = find_cached_tool("lake")
+    if cached is not None:
+        return cached
+
     names = ["lake.exe", "lake"] if WINDOWS else ["lake"]
     for name in names:
         hit = shutil.which(name)
@@ -187,6 +396,10 @@ def find_lake() -> Path | None:
 
 
 def find_lean(lake: Path | None = None) -> Path | None:
+    cached = find_cached_tool("lean")
+    if cached is not None:
+        return cached
+
     names = ["lean.exe", "lean"] if WINDOWS else ["lean"]
     for name in names:
         hit = shutil.which(name)
@@ -217,12 +430,22 @@ def subprocess_env_for_tool(tool: Path | None = None) -> dict[str, str]:
         env["PATH"] = f"{tool.parent}{os.pathsep}{env.get('PATH', '')}"
 
     profile = derive_user_profile_from_tool(tool)
+    inferred_elan_home = derive_elan_home_from_tool(tool)
     if profile is not None:
-        env["USERPROFILE"] = str(profile)
-        env["HOME"] = str(profile)
-        elan_home = profile / ".elan"
-        if elan_home.exists():
-            env["ELAN_HOME"] = str(elan_home)
+        preferred_home = safe_resolve(profile)
+        desired_elan_home = inferred_elan_home or normalize_path(env.get("ELAN_HOME")) or preferred_home / ".elan"
+        if desired_elan_home is not None and path_contains(desired_elan_home, preferred_home) and writability_error(preferred_home) is not None:
+            desired_elan_home = None
+
+        if writability_error(preferred_home) is None and desired_elan_home is not None and prepare_writable_directory(desired_elan_home):
+            effective_home = preferred_home
+            effective_elan_home = desired_elan_home
+        else:
+            effective_home, effective_elan_home = resolve_fallback_tool_homes(desired_elan_home)
+
+        env["USERPROFILE"] = str(effective_home)
+        env["HOME"] = str(effective_home)
+        env["ELAN_HOME"] = str(effective_elan_home)
 
     return env
 
