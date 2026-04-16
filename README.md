@@ -1,91 +1,116 @@
 # Mathlib ML Architect Plugin
 
-This plugin now supports two companion flows for honest ML architecture review:
+A plugin for **honest ML architecture review** with two companion workflows:
 
-1. **Typed architecture tomography** for structural analysis via typed states, matrices,
-   invariants, shortcut-path inspection, and train/infer congruence.
-2. **Mathlib-backed verification** for the subset of subclaims that can be checked locally
-   in Lean/mathlib.
+1. **Typed architecture tomography**  
+   Structural analysis through typed states, matrices, invariants, shortcut-path inspection, and train/infer congruence.
 
-The contract is strict:
+2. **Mathlib-backed verification**  
+   Local formal checking in Lean/mathlib for the subset of claims that can actually be verified.
 
-- structural findings are **not** Lean verification;
-- engineering inference stays separate from formal support;
-- benchmark, deployment, and training claims stay empirical unless proven otherwise.
+## Core Contract
 
-## Official Flows
+This plugin enforces a strict separation between kinds of evidence:
 
-### A. Structural flow
+- **Structural findings are not Lean verification**
+- **Engineering inference remains separate from formal support**
+- **Benchmark, deployment, and training claims remain empirical unless explicitly proven otherwise**
 
-Use the `typed-architecture-tomography` skill to decompose the architecture into typed
-states, operators, matrices, risks, and formalization candidates.
+## Official Workflows
 
-For nontrivial requests, emit a bundle and validate it:
+### 1. Structural workflow
+
+Use the `typed-architecture-tomography` skill to decompose an architecture into:
+
+- typed states
+- operators
+- matrices
+- risks
+- formalization candidates
+
+For non-trivial requests, generate a bundle and validate it:
 
 ```bash
 python scripts/validate_tomography_bundle.py --bundle-dir <dir>
+````
+
+### 2. Formal workflow
+
+#### Step 1 — Check environment readiness
+
+```bash
+python scripts/doctor.py
 ```
 
-### B. Formal flow
+#### Step 2 — Prepare the shared workspace
 
-1. Inspect readiness:
+```bash
+python scripts/setup_plugin.py --target search
+python scripts/setup_plugin.py --target verify --yes
+```
 
-   ```bash
-   python scripts/doctor.py
-   ```
+#### Step 3 — Search candidate facts and verify the exact Lean claim
 
-2. Prepare the shared workspace:
+```bash
+python scripts/search_mathlib.py "<query>"
+python scripts/lean_check.py --json
+```
 
-   ```bash
-   python scripts/setup_plugin.py --target search
-   python scripts/setup_plugin.py --target verify --yes
-   ```
+#### Step 4 — Validate the final formal review bundle
 
-3. Search candidate facts and verify the exact Lean claim you want to cite:
-
-   ```bash
-   python scripts/search_mathlib.py "<query>"
-   python scripts/lean_check.py --json
-   ```
-
-4. Validate the final formal review bundle:
-
-   ```bash
-   python scripts/validate_artifact_bundle.py --bundle-dir <dir>
-   ```
+```bash
+python scripts/validate_artifact_bundle.py --bundle-dir <dir>
+```
 
 ## Supported Product Surface
 
-- `scripts/doctor.py`
-- `scripts/setup_plugin.py`
-- `scripts/search_mathlib.py`
-- `scripts/lean_check.py`
-- `scripts/validate_artifact_bundle.py`
-- `scripts/validate_tomography_bundle.py`
-- `references/architecture_contract.md`
-- `references/mathlib_scope.md`
-- `references/tomography_contract.md`
-- `references/tomography_scope.md`
-- `references/matrix_legend.md`
-- `references/claim_extraction_rules.md`
-- `skills/mathlib-ml-arch/SKILL.md`
-- `skills/typed-architecture-tomography/SKILL.md`
+### Scripts
 
-Low-level repair helpers such as `bootstrap_toolchain.py` and `bootstrap_proofs.py`
-remain available for advanced/manual recovery, but they are not the primary entry path.
+* `scripts/doctor.py`
+* `scripts/setup_plugin.py`
+* `scripts/search_mathlib.py`
+* `scripts/lean_check.py`
+* `scripts/validate_artifact_bundle.py`
+* `scripts/validate_tomography_bundle.py`
 
-## What This Plugin Does Not Do
+### Reference documents
 
-- It does not present a fixture replay as a live architecture audit.
-- It does not label a structural finding as formal support when Lean verification was not obtained.
-- It does not infer benchmark wins, optimizer stability, or deployment gains from clean matrices.
-- It does not treat shape equality as semantic compatibility.
+* `references/architecture_contract.md`
+* `references/mathlib_scope.md`
+* `references/tomography_contract.md`
+* `references/tomography_scope.md`
+* `references/matrix_legend.md`
+* `references/claim_extraction_rules.md`
 
-## Example Only
+### Skills
 
-- `examples/run_demo_review.py` copies the bundled formal demo bundle from
-  `examples/demo-review/` into an output directory and validates it.
-- `examples/run_demo_tomography.py` copies the bundled structural demo bundle from
-  `examples/demo-tomography/` into an output directory and validates it.
+* `skills/mathlib-ml-arch/SKILL.md`
+* `skills/typed-architecture-tomography/SKILL.md`
 
-Both are examples, not the main audit flow.
+## Advanced / Manual Recovery
+
+Low-level repair helpers remain available for advanced recovery workflows, but they are **not** the primary entry path:
+
+* `bootstrap_toolchain.py`
+* `bootstrap_proofs.py`
+
+## Non-Goals
+
+This plugin does **not**:
+
+* present a fixture replay as a live architecture audit
+* label a structural finding as formal support when Lean verification was not obtained
+* infer benchmark wins, optimizer stability, or deployment gains from clean matrices
+* treat shape equality as semantic compatibility
+
+## Examples
+
+These example scripts demonstrate the bundled demo flows only:
+
+* `examples/run_demo_review.py`
+  Copies the bundled formal demo bundle from `examples/demo-review/` into an output directory and validates it.
+
+* `examples/run_demo_tomography.py`
+  Copies the bundled structural demo bundle from `examples/demo-tomography/` into an output directory and validates it.
+
+> These are examples only, not the main audit flow.
