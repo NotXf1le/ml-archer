@@ -1,19 +1,11 @@
 ﻿from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
-sys.dont_write_bytecode = True
-
-ROOT_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-if str(ROOT_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_SCRIPTS_DIR))
-
-import doctor  # noqa: E402
+from ml_archer.formal import doctor
 
 
 class DoctorTests(unittest.TestCase):

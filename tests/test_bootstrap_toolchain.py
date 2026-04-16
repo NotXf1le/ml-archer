@@ -9,14 +9,7 @@ from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch
 
-
-sys.dont_write_bytecode = True
-
-ROOT_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-if str(ROOT_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_SCRIPTS_DIR))
-
-import bootstrap_toolchain  # noqa: E402
+from ml_archer.formal import bootstrap_toolchain
 
 
 class BootstrapToolchainTests(unittest.TestCase):

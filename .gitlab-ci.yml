@@ -1,0 +1,61 @@
+stages:
+  - lint
+  - unit
+  - formal
+  - bundle
+
+variables:
+  ML_ARCHER_HOME: "$CI_PROJECT_DIR/.ml-archer-home"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+
+cache:
+  key:
+    files:
+      - scripts/formal/templates/lean-toolchain
+      - scripts/formal/templates/lakefile.toml
+  paths:
+    - .ml-archer-home/cache/ml-archer/
+    - .pip-cache/
+
+lint:
+  stage: lint
+  image: python:3.11
+  script:
+    - python -m pip install --upgrade pip
+    - pip install -e ".[dev]"
+    - ruff check .
+
+unit:
+  stage: unit
+  image: python:3.11
+  script:
+    - python -m pip install --upgrade pip
+    - pip install -e ".[dev]"
+    - pytest -q tests
+
+formal_smoke:
+  stage: formal
+  image: python:3.11
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - python -m pip install --upgrade pip
+    - pip install -e ".[dev]"
+    - python scripts/formal/setup.py --target search --allow-network --yes
+    - python scripts/formal/search_mathlib.py "LinearMap"
+
+bundle:
+  stage: bundle
+  image: python:3.11
+  rules:
+    - if: '$CI_COMMIT_TAG'
+  script:
+    - python -m pip install --upgrade pip
+    - pip install -e ".[dev]"
+    - python scripts/formal/setup.py --target verify --allow-network --yes
+    - python scripts/formal/build_bundle.py --output dist/
+  artifacts:
+    paths:
+      - dist/*
+    expire_in: 7 days

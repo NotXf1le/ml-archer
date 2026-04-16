@@ -215,6 +215,7 @@
       "candidate_id": "fc_projection_idempotent",
       "natural_language_claim": "If the key normalizer is an orthogonal projection onto a subspace, applying it twice equals applying it once.",
       "reason_it_is_formalizable": "This is a local linear-algebraic/idempotence property.",
+      "target_backend": "mathlib",
       "theorem_family": "projection/idempotence",
       "search_terms": [
         "orthogonal projection idempotent",
@@ -233,6 +234,7 @@
       "candidate_id": "fc_norm_bound",
       "natural_language_claim": "The norm of a residual sum is bounded by the sum of the norms.",
       "reason_it_is_formalizable": "This is a standard normed-space inequality.",
+      "target_backend": "mathlib",
       "theorem_family": "triangle inequality",
       "search_terms": [
         "norm add le",

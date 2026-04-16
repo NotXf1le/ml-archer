@@ -8,10 +8,9 @@ import shutil
 import stat
 import subprocess
 import sys
-import time
 from pathlib import Path
 
-from common import (
+from ml_archer.shared.common import (
     add_git_safe_directories,
     codex_home,
     configure_stdout,
@@ -31,8 +30,8 @@ from common import (
     subprocess_env_for_tool,
     writability_error,
 )
-from process_runner import CommandSpec, SubprocessRunner, coerce_text
-from script_output import PayloadEmitter, append_unique as append_unique_message
+from ml_archer.shared.process_runner import CommandSpec, SubprocessRunner, coerce_text
+from ml_archer.shared.script_output import PayloadEmitter, append_unique as append_unique_message
 
 
 DEFAULT_SCRATCH = """import Mathlib
@@ -41,10 +40,7 @@ DEFAULT_SCRATCH = """import Mathlib
 """
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Bootstrap the shared proofs/ project, fetch mathlib, and validate the environment."
-    )
+def configure_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--workspace",
         help="Workspace root or child directory. Defaults to the current directory.",
@@ -53,7 +49,7 @@ def parse_args() -> argparse.Namespace:
         "--scope",
         choices=["auto", "local", "shared"],
         default="auto",
-        help="Where to create or reuse the proofs project. The plugin is shared-workspace-only; `auto`, `shared`, and legacy `local` all resolve to the shared CODEX_HOME cache.",
+        help="Where to create or reuse the proofs project. The addon is shared-workspace-only; `auto`, `shared`, and legacy `local` all resolve to the shared ml-archer cache.",
     )
     parser.add_argument(
         "--proofs-dir",
@@ -101,6 +97,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Emit machine-readable JSON diagnostics.",
     )
+    
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Bootstrap the explicit formal proofs workspace, fetch mathlib, and validate the environment."
+    )
+    configure_parser(parser)
     return parser.parse_args()
 
 
@@ -174,16 +177,16 @@ def failure_guidance(step_name: str, reason: str, selected_scope: str) -> str:
         if selected_scope == "shared":
             return (
                 f"`{step_name}` could not write into the shared workspace. "
-                "Set `CODEX_HOME` to a writable directory and rerun bootstrap."
+                "Set `ML_ARCHER_HOME` or `CODEX_HOME` to a writable directory and rerun bootstrap."
             )
         return (
             f"`{step_name}` could not write into the selected workspace. "
-            "Choose a writable workspace or rerun after setting `CODEX_HOME` to a writable directory."
+            "Choose a writable workspace or rerun after setting `ML_ARCHER_HOME` or `CODEX_HOME` to a writable directory."
         )
     if reason == "home_directory":
         return (
             f"`{step_name}` could not create Lean's home directory. "
-            "Set `CODEX_HOME` to a writable directory or rerun in an environment where HOME/USERPROFILE is writable."
+            "Set `ML_ARCHER_HOME` or `CODEX_HOME` to a writable directory or rerun in an environment where HOME/USERPROFILE is writable."
         )
     if reason == "timeout":
         return (
@@ -198,7 +201,7 @@ def failure_guidance(step_name: str, reason: str, selected_scope: str) -> str:
     if reason == "toolchain":
         return (
             f"`{step_name}` could not use the Lean toolchain. "
-            "Run `python scripts/doctor.py` to inspect the environment, then reinstall or initialize Lean 4 before retrying."
+            "Run `python scripts/formal/doctor.py` to inspect the formal addon, then reinstall or initialize Lean 4 before retrying."
         )
     if reason == "package_state":
         return (
@@ -377,9 +380,8 @@ def print_human(payload: dict[str, object]) -> None:
             print(f"  - {step}")
 
 
-def main() -> int:
+def main_from_args(args: argparse.Namespace) -> int:
     configure_stdout()
-    args = parse_args()
     requested_workspace = requested_workspace_root(args.workspace)
     local_workspace = find_existing_proofs_root(requested_workspace)
     workspace_root, selected_scope, selection_warnings = select_bootstrap_workspace(requested_workspace, args.scope)
@@ -440,7 +442,7 @@ def main() -> int:
     if lake is None:
         append_unique(
             payload["next_steps"],
-            "Run `python scripts/setup_plugin.py --target search --yes` to populate the shared environment, then retry the advanced bootstrap command only if you still need manual recovery.",
+            "Run `python scripts/formal/setup.py --target search --allow-network --yes` to populate the formal addon environment, then retry the advanced bootstrap command only if you still need manual recovery.",
         )
         emit_payload(args, payload)
         return 2
@@ -684,16 +686,16 @@ def main() -> int:
         )
         append_unique(
             payload["next_steps"],
-            "Run `python scripts/setup_plugin.py --target verify --yes` when you need full Lean verification artifacts.",
+            "Run `python scripts/formal/setup.py --target verify --allow-network --yes` when you need full Lean verification artifacts.",
         )
 
     if should_run_verify:
-        lean_check = Path(__file__).with_name("lean_check.py")
         try:
             verify_proc = subprocess.run(
                 [
                     sys.executable,
-                    str(lean_check),
+                    "-m",
+                    "ml_archer.formal.lean_check",
                     "--workspace",
                     str(workspace_root),
                     "--timeout-seconds",
@@ -728,7 +730,7 @@ def main() -> int:
         if not payload["verification"].get("success"):
             append_unique(
                 payload["next_steps"],
-                "Verification did not pass. Inspect the JSON diagnostics from `python scripts/lean_check.py --json` and retry.",
+                "Verification did not pass. Inspect the JSON diagnostics from `python scripts/formal/lean_check.py --json` and retry.",
             )
 
     package_lib_dirs = discover_package_lib_dirs(proofs_dir)
@@ -794,6 +796,10 @@ def main() -> int:
 
     emit_payload(args, payload)
     return 0 if payload["success"] else 5
+
+
+def main() -> int:
+    return main_from_args(parse_args())
 
 
 if __name__ == "__main__":

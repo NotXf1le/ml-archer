@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ml_archer.tomography.validate_bundle import main
+from ml_archer.formal.validate_formal_bundle import main
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ Key/query separation requires an explicit cast. Direction normalization requires
 
 Training uses teacher-forced context in the updater, while inference reuses self-generated state, so congruence is only partial.
 
-## Formalization candidates for mathlib
+## Formalization candidates
 
 Projection/idempotence and local norm-boundedness claims are good candidates for the formal layer.
 

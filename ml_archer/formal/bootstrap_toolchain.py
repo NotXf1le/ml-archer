@@ -5,7 +5,11 @@ import os
 import shutil
 from pathlib import Path
 
-from common import (
+from ml_archer.formal.toolchain_bootstrap_service import (
+    ToolchainBootstrapDependencies,
+    ToolchainBootstrapService,
+)
+from ml_archer.shared.common import (
     configure_stdout,
     find_cached_tool,
     find_elan,
@@ -15,19 +19,19 @@ from common import (
     subprocess_env_for_tool,
     writability_error,
 )
-from process_runner import CommandSpec, SubprocessRunner, detect_tool_version as probe_tool_version
-from script_output import PayloadEmitter, append_unique as append_unique_message
-from toolchain_bootstrap_service import ToolchainBootstrapDependencies, ToolchainBootstrapService
+from ml_archer.shared.process_runner import (
+    CommandSpec,
+    SubprocessRunner,
+    detect_tool_version as probe_tool_version,
+)
+from ml_archer.shared.script_output import PayloadEmitter, append_unique as append_unique_message
 
 
 def plugin_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Populate a plugin-local Lean/Lake toolchain cache under CODEX_HOME instead of relying on the host profile."
-    )
+def configure_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--toolchain",
         default="stable",
@@ -54,6 +58,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Emit machine-readable diagnostics.",
     )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Populate an ml-archer-local Lean/Lake cache instead of relying on the host profile."
+    )
+    configure_parser(parser)
     return parser.parse_args()
 
 
@@ -181,9 +192,8 @@ def print_human(payload: dict[str, object]) -> None:
             print(f"  - {step}")
 
 
-def main() -> int:
+def main_from_args(args: argparse.Namespace) -> int:
     configure_stdout()
-    args = parse_args()
     payload, exit_code = ToolchainBootstrapService(
         ToolchainBootstrapDependencies(
             resolve_fallback_tool_homes=resolve_fallback_tool_homes,
@@ -202,6 +212,10 @@ def main() -> int:
     ).bootstrap(args)
     emit_payload(args, payload)
     return exit_code
+
+
+def main() -> int:
+    return main_from_args(parse_args())
 
 
 if __name__ == "__main__":

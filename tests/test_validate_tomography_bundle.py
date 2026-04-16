@@ -2,20 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch
 
-sys.dont_write_bytecode = True
-
-ROOT_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-if str(ROOT_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_SCRIPTS_DIR))
-
-from validate_tomography_bundle import resolve_targets, validate_report, validate_tomography  # noqa: E402
+from ml_archer.tomography.validate_bundle import resolve_targets, validate_report, validate_tomography
 
 VALID_REPORT = """## Architecture decomposition
 
@@ -45,7 +38,7 @@ VALID_REPORT = """## Architecture decomposition
 
 - Example.
 
-## Formalization candidates for mathlib
+## Formalization candidates
 
 - Example.
 
@@ -139,6 +132,7 @@ class ValidateTomographyBundleTests(unittest.TestCase):
                     "candidate_id": "fc_1",
                     "natural_language_claim": "Projection used in the key normalizer is idempotent.",
                     "reason_it_is_formalizable": "This is a local linear-algebraic claim.",
+                    "target_backend": "mathlib",
                     "theorem_family": "projection/idempotence",
                     "search_terms": ["projection idempotent", "orthogonal projection"],
                     "suggested_import_nouns": ["LinearMap", "Submodule", "Projection"],
@@ -221,7 +215,7 @@ class ValidateTomographyBundleTests(unittest.TestCase):
                 json=False,
             )
 
-            with patch("validate_tomography_bundle.plugin_root", return_value=plugin_root):
+            with patch("ml_archer.tomography.validate_bundle.plugin_root", return_value=plugin_root):
                 report_path, tomography_path = resolve_targets(args)
 
             self.assertEqual(report_path, workspace_report.resolve())

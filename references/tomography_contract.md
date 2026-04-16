@@ -30,7 +30,7 @@ Identical shape is never enough to justify mixing states.
 5. Shortcut and path dominance
 6. Invariants and singularities
 7. Train/infer congruence
-8. Formalization candidates for mathlib
+8. Formalization candidates
 9. Empirical-only claims
 10. Risks and redesign guidance
 
@@ -58,7 +58,7 @@ Do **not** use any of the following inside the tomography bundle:
 - `verification_method`
 - `claim_label`
 
-Those belong to the formal architecture contract, not the structural one.
+Those belong to the formal verification contract, not the structural one.
 
 ## Bundle Format
 
@@ -203,6 +203,7 @@ Each candidate must include:
 - `candidate_id`
 - `natural_language_claim`
 - `reason_it_is_formalizable`
+- `target_backend`
 - `theorem_family`
 - `search_terms`
 - `suggested_import_nouns`

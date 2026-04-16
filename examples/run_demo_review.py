@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_validation(output_dir: Path) -> dict[str, object]:
-    validator = plugin_root() / "scripts" / "validate_artifact_bundle.py"
+    validator = plugin_root() / "scripts" / "formal" / "validate_formal_bundle.py"
     result = subprocess.run(
         [sys.executable, str(validator), "--bundle-dir", str(output_dir), "--json"],
         check=False,

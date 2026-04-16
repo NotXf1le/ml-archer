@@ -7,16 +7,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-import doctor
-from common import configure_stdout, requested_workspace_root
-from script_output import PayloadEmitter, append_unique as append_unique_message
-from setup_workflow import SetupPlanner, SetupWorkflow, SetupWorkflowDependencies
+from ml_archer.formal import doctor, install_bundle
+from ml_archer.formal.setup_workflow import SetupPlanner, SetupWorkflow, SetupWorkflowDependencies
+from ml_archer.shared.common import configure_stdout, requested_workspace_root
+from ml_archer.shared.script_output import PayloadEmitter, append_unique as append_unique_message
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Check whether the plugin is ready, then guide the user through shared mathlib setup for search or Lean verification."
-    )
+SCRIPT_MODULES = {
+    "bootstrap_proofs.py": "ml_archer.formal.bootstrap_proofs",
+    "bootstrap_toolchain.py": "ml_archer.formal.bootstrap_toolchain",
+}
+
+
+def configure_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--workspace",
         help="Workspace root or child directory to inspect. Defaults to the current directory.",
@@ -38,6 +41,20 @@ def parse_args() -> argparse.Namespace:
         help="Run the required setup steps without interactive confirmation.",
     )
     parser.add_argument(
+        "--bundle",
+        help="Install a prewarmed formal bundle before checking readiness.",
+    )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Do not attempt network bootstrap. Requires an existing cache or --bundle.",
+    )
+    parser.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="Explicitly allow network-backed bootstrap for the formal addon.",
+    )
+    parser.add_argument(
         "--timeout-seconds",
         type=int,
         default=900,
@@ -48,6 +65,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Emit machine-readable JSON.",
     )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Check whether the formal addon is ready, then guide the user through explicit setup for theorem search or Lean verification."
+    )
+    configure_parser(parser)
     return parser.parse_args()
 
 
@@ -83,8 +107,8 @@ def planned_steps(payload: dict[str, object], target: str, timeout_seconds: int)
 
 
 def step_command(script_name: str, workspace_root: Path, args: list[str]) -> list[str]:
-    script_path = Path(__file__).with_name(script_name)
-    command = [sys.executable, str(script_path)]
+    module_name = SCRIPT_MODULES[script_name]
+    command = [sys.executable, "-m", module_name]
     if script_name == "bootstrap_proofs.py":
         command.extend(["--workspace", str(workspace_root), "--scope", "shared"])
     command.extend(args)
@@ -177,10 +201,71 @@ def _workflow() -> SetupWorkflow:
     )
 
 
-def main() -> int:
+def main_from_args(args: argparse.Namespace) -> int:
     configure_stdout()
-    args = parse_args()
     workspace_root = requested_workspace_root(args.workspace)
+    bundle = getattr(args, "bundle", None)
+    offline = bool(getattr(args, "offline", False))
+    allow_network = bool(getattr(args, "allow_network", False))
+    if bundle:
+        install_bundle.install_bundle(Path(bundle).expanduser().resolve())
+
+    preflight = doctor.build_payload(workspace_root, "shared")
+    if SetupPlanner.target_ready(preflight, args.target):
+        payload = {
+            "requested_workspace": str(workspace_root),
+            "target": args.target,
+            "status": "success",
+            "success": True,
+            "preflight": preflight,
+            "readiness_before": preflight.get("readiness_level"),
+            "readiness_after": preflight.get("readiness_level"),
+            "missing_requirements": [],
+            "planned_steps": [],
+            "steps": [],
+            "next_steps": list(preflight.get("next_steps", [])),
+        }
+        emit_payload(args, payload)
+        return 0
+
+    if offline and args.yes:
+        payload = {
+            "requested_workspace": str(workspace_root),
+            "target": args.target,
+            "status": "blocked",
+            "success": False,
+            "preflight": preflight,
+            "readiness_before": preflight.get("readiness_level"),
+            "readiness_after": preflight.get("readiness_level"),
+            "missing_requirements": missing_requirements(preflight, args.target),
+            "planned_steps": [step["label"] for step in planned_steps(preflight, args.target, args.timeout_seconds)],
+            "steps": [],
+            "next_steps": [
+                "Offline mode is enabled. Provide `--bundle <path>` or install the formal cache before retrying."
+            ],
+        }
+        emit_payload(args, payload)
+        return 6
+
+    if not allow_network and args.yes:
+        payload = {
+            "requested_workspace": str(workspace_root),
+            "target": args.target,
+            "status": "blocked",
+            "success": False,
+            "preflight": preflight,
+            "readiness_before": preflight.get("readiness_level"),
+            "readiness_after": preflight.get("readiness_level"),
+            "missing_requirements": missing_requirements(preflight, args.target),
+            "planned_steps": [step["label"] for step in planned_steps(preflight, args.target, args.timeout_seconds)],
+            "steps": [],
+            "next_steps": [
+                f"Rerun `python scripts/formal/setup.py --target {args.target} --allow-network --yes` to permit formal bootstrap."
+            ],
+        }
+        emit_payload(args, payload)
+        return 6
+
     workflow = _workflow()
     payload, return_code = workflow.execute(args, workspace_root)
 
@@ -194,7 +279,7 @@ def main() -> int:
         if not confirm_setup():
             payload["status"] = "cancelled"
             payload["next_steps"] = [
-                f"Run `python scripts/setup_plugin.py --target {args.target} --yes` when you want to download and configure the shared environment."
+                f"Run `python scripts/formal/setup.py --target {args.target} --allow-network --yes` when you want to download and configure the shared formal environment."
             ]
             emit_payload(args, payload)
             return 4
@@ -203,6 +288,10 @@ def main() -> int:
 
     emit_payload(args, payload)
     return int(return_code)
+
+
+def main() -> int:
+    return main_from_args(parse_args())
 
 
 if __name__ == "__main__":

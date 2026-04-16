@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import (
+from ml_archer.shared.common import (
     add_git_safe_directories,
     build_lean_path,
     configure_stdout,
@@ -26,14 +26,11 @@ def missing_proofs_message(scope: str) -> str:
     shared_root = shared_workspace_root()
     return (
         "No shared Lean proofs project was found. Expected a `proofs/` directory under "
-        f"{shared_root}. Run `python scripts/setup_plugin.py --target verify --yes` before retrying."
+        f"{shared_root}. Run `python scripts/formal/setup.py --target verify --allow-network --yes` before retrying."
     )
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Typecheck a Lean scratch file inside the shared proofs project."
-    )
+def configure_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--workspace",
         help="Workspace root or child directory to search from. Defaults to the current directory.",
@@ -42,7 +39,7 @@ def parse_args() -> argparse.Namespace:
         "--scope",
         choices=["auto", "local", "shared"],
         default="auto",
-        help="Which proofs workspace to verify. The plugin is shared-workspace-only; `auto`, `shared`, and legacy `local` all resolve to the shared CODEX_HOME cache.",
+        help="Which proofs workspace to verify. The addon is shared-workspace-only; `auto`, `shared`, and legacy `local` all resolve to the shared ml-archer cache.",
     )
     parser.add_argument(
         "--file",
@@ -72,6 +69,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Emit machine-readable JSON diagnostics.",
     )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Typecheck a Lean scratch file inside the explicit formal proofs project."
+    )
+    configure_parser(parser)
     return parser.parse_args()
 
 
@@ -142,9 +146,8 @@ def print_human_summary(payload: dict[str, object]) -> None:
             print(f"  stderr: {stderr.splitlines()[-1]}")
 
 
-def main() -> int:
+def main_from_args(args: argparse.Namespace) -> int:
     configure_stdout()
-    args = parse_args()
     requested_workspace = requested_workspace_root(args.workspace)
     root, selected_scope, workspace_status, bootstrap_payload = ensure_shared_proofs_workspace(
         requested_workspace,
@@ -157,7 +160,7 @@ def main() -> int:
         if setup_required:
             error = (
                 "Shared proofs workspace is only search-ready. "
-                "Run `python scripts/setup_plugin.py --target verify --yes` to prepare full Lean verification artifacts."
+                "Run `python scripts/formal/setup.py --target verify --allow-network --yes` to prepare full Lean verification artifacts."
             )
         if bootstrap_payload is not None and not setup_required:
             error = (
@@ -275,6 +278,10 @@ def main() -> int:
         print_human_summary(payload)
 
     return 0 if payload["success"] else 3
+
+
+def main() -> int:
+    return main_from_args(parse_args())
 
 
 if __name__ == "__main__":

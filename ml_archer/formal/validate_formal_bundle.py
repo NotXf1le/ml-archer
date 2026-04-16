@@ -5,7 +5,7 @@ import re
 import sys
 from pathlib import Path
 
-from artifact_bundle_service import (
+from ml_archer.formal.artifact_bundle_service import (
     ArtifactBundleValidator,
     ArtifactResolutionDependencies,
     ArtifactTargetResolver,
@@ -13,7 +13,7 @@ from artifact_bundle_service import (
     latest_report as service_latest_report,
     report_in_bundle_dir as service_report_in_bundle_dir,
 )
-from script_output import PayloadEmitter
+from ml_archer.shared.script_output import PayloadEmitter
 
 
 REQUIRED_SECTIONS = [
@@ -54,17 +54,14 @@ def configure_stdout() -> None:
 
 
 def plugin_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def default_workspace_root() -> Path:
     return Path.cwd().resolve()
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Validate a mathlib-ml-arch artifact bundle without relying on hooks."
-    )
+def configure_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--bundle-dir",
         help="Directory containing report.md and evidence.json.",
@@ -91,6 +88,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Emit machine-readable output.",
     )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Validate an ml-archer formal evidence bundle without relying on hooks."
+    )
+    configure_parser(parser)
     return parser.parse_args()
 
 
@@ -177,9 +181,8 @@ def print_human(payload: dict[str, object]) -> None:
             print(f"  - {issue}")
 
 
-def main() -> int:
+def main_from_args(args: argparse.Namespace) -> int:
     configure_stdout()
-    args = parse_args()
     report_path, evidence_path = resolve_targets(args)
 
     if report_path is None or evidence_path is None:
@@ -208,6 +211,10 @@ def main() -> int:
     PayloadEmitter(json_enabled=args.json, human_printer=print_human).emit(payload)
 
     return 0 if payload["valid"] else 1
+
+
+def main() -> int:
+    return main_from_args(parse_args())
 
 
 if __name__ == "__main__":

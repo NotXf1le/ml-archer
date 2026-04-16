@@ -1,19 +1,11 @@
 ﻿from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
-sys.dont_write_bytecode = True
-
-ROOT_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-if str(ROOT_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_SCRIPTS_DIR))
-
-import common  # noqa: E402
+from ml_archer.shared import common
 
 
 class CommonTests(unittest.TestCase):
@@ -231,7 +223,7 @@ class CommonTests(unittest.TestCase):
 
             with (
                 patch.object(common, "codex_home", return_value=codex_root),
-                patch("common.shutil.which", return_value=str(Path(tmp) / "host-lake.exe")),
+                patch("ml_archer.shared.common.shutil.which", return_value=str(Path(tmp) / "host-lake.exe")),
                 patch.object(common, "candidate_user_profiles", return_value=[]),
             ):
                 resolved = common.find_lake()
@@ -249,7 +241,7 @@ class CommonTests(unittest.TestCase):
 
             with (
                 patch.object(common, "codex_home", return_value=codex_root),
-                patch("common.shutil.which", return_value=str(host_lake)),
+                patch("ml_archer.shared.common.shutil.which", return_value=str(host_lake)),
                 patch.object(common, "candidate_user_profiles", return_value=[]),
             ):
                 resolved = common.find_lake()
@@ -265,7 +257,7 @@ class CommonTests(unittest.TestCase):
                 stdout = "{}"
                 stderr = ""
 
-            with patch("common.subprocess.run", return_value=Result()) as run_mock:
+            with patch("ml_archer.shared.common.subprocess.run", return_value=Result()) as run_mock:
                 payload = common.run_bootstrap_proofs(workspace, timeout_seconds=42)
 
             command = run_mock.call_args.args[0]
@@ -311,7 +303,7 @@ class CommonTests(unittest.TestCase):
             with (
                 patch.object(common, "codex_home", return_value=codex_root),
                 patch.object(common, "writability_error", side_effect=fake_writability_error),
-                patch("common.tempfile.gettempdir", return_value=str(temp_root)),
+                patch("ml_archer.shared.common.tempfile.gettempdir", return_value=str(temp_root)),
             ):
                 resolved = common.shared_workspace_root()
 
@@ -363,7 +355,7 @@ class CommonTests(unittest.TestCase):
                 patch.object(common, "derive_user_profile_from_tool", return_value=blocked_profile),
                 patch.object(common, "codex_home", return_value=blocked_codex),
                 patch.object(common, "writability_error", side_effect=fake_writability_error),
-                patch("common.tempfile.gettempdir", return_value=str(temp_root)),
+                patch("ml_archer.shared.common.tempfile.gettempdir", return_value=str(temp_root)),
             ):
                 env = common.subprocess_env_for_tool(Path(tmp) / "lake.exe")
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from script_output import append_unique
+from ml_archer.shared.script_output import append_unique
 
 
 @dataclass(frozen=True)
@@ -54,7 +54,7 @@ class ToolchainBootstrapService:
         if payload["next_steps"]:
             append_unique(
                 payload["next_steps"],
-                "Set CODEX_HOME to a writable directory and rerun bootstrap_toolchain.py.",
+                "Set `ML_ARCHER_HOME` or `CODEX_HOME` to a writable directory and rerun `python scripts/formal/bootstrap_toolchain.py`.",
             )
             return payload, 3
 
@@ -69,7 +69,7 @@ class ToolchainBootstrapService:
         if elan is None:
             append_unique(
                 payload["next_steps"],
-                "No `elan` executable was found. Install Lean once globally or provide a portable `elan` binary, then rerun bootstrap_toolchain.py.",
+                "No `elan` executable was found. Install Lean once globally or provide a portable `elan` binary, then rerun `python scripts/formal/bootstrap_toolchain.py`.",
             )
             return payload, 2
 

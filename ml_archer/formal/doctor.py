@@ -3,7 +3,8 @@
 import argparse
 from pathlib import Path
 
-from common import (
+from ml_archer.formal.doctor_service import DoctorDependencies, DoctorPayloadBuilder
+from ml_archer.shared.common import (
     cached_elan_homes,
     codex_home,
     configure_stdout,
@@ -21,15 +22,11 @@ from common import (
     subprocess_env_for_tool,
     writability_error,
 )
-from doctor_service import DoctorDependencies, DoctorPayloadBuilder
-from process_runner import detect_tool_version as probe_tool_version
-from script_output import PayloadEmitter
+from ml_archer.shared.process_runner import detect_tool_version as probe_tool_version
+from ml_archer.shared.script_output import PayloadEmitter
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Inspect the shared Lean/mathlib workspace and emit agent-friendly diagnostics."
-    )
+def configure_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--workspace",
         help="Workspace root or child directory to inspect. Defaults to the current directory.",
@@ -38,13 +35,20 @@ def parse_args() -> argparse.Namespace:
         "--scope",
         choices=["auto", "local", "shared"],
         default="auto",
-        help="Which proofs workspace to inspect. The plugin is shared-workspace-only; `auto`, `shared`, and legacy `local` all resolve to the shared CODEX_HOME cache.",
+        help="Which proofs workspace to inspect. The addon is shared-workspace-only; `auto`, `shared`, and legacy `local` all resolve to the shared ml-archer cache.",
     )
     parser.add_argument(
         "--json",
         action="store_true",
         help="Emit machine-readable JSON instead of text.",
     )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Inspect the explicit Lean/mathlib addon and emit agent-friendly diagnostics."
+    )
+    configure_parser(parser)
     return parser.parse_args()
 
 
@@ -122,15 +126,18 @@ def print_human(payload: dict[str, object]) -> None:
             print(f"  - {step}")
 
 
-def main() -> int:
+def main_from_args(args: argparse.Namespace) -> int:
     configure_stdout()
-    args = parse_args()
     workspace_root = requested_workspace_root(args.workspace)
     payload = build_payload(workspace_root, args.scope)
 
     PayloadEmitter(json_enabled=args.json, human_printer=print_human).emit(payload)
 
     return 0 if payload["ready_for_search"] else 1
+
+
+def main() -> int:
+    return main_from_args(parse_args())
 
 
 if __name__ == "__main__":

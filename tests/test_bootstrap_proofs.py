@@ -12,14 +12,7 @@ from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch
 
-
-sys.dont_write_bytecode = True
-
-ROOT_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-if str(ROOT_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_SCRIPTS_DIR))
-
-import bootstrap_proofs  # noqa: E402
+from ml_archer.formal import bootstrap_proofs
 
 
 class BootstrapProofsTests(unittest.TestCase):
@@ -797,7 +790,7 @@ class BootstrapProofsTests(unittest.TestCase):
                 ),
                 patch.object(bootstrap_proofs, "run_command") as run_command_mock,
                 patch(
-                    "bootstrap_proofs.subprocess.run",
+                    "ml_archer.formal.bootstrap_proofs.subprocess.run",
                     return_value=subprocess.CompletedProcess(
                         args=["python", "lean_check.py"],
                         returncode=0,

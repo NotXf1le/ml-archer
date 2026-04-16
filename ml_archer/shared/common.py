@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 WINDOWS = os.name == "nt"
-PLUGIN_SLUG = "mathlib-ml-arch"
+PLUGIN_SLUG = "ml-archer"
 READINESS_SMOKE_TIMEOUT_SECONDS = 120
 READINESS_SMOKE_FILENAME = "__CodexVerificationReadiness.lean"
 READINESS_SMOKE_SOURCE = """import Mathlib
@@ -105,9 +105,10 @@ def is_writable_path(path: str | Path | None) -> bool:
 
 
 def codex_home() -> Path:
-    configured = os.environ.get("CODEX_HOME")
-    if configured:
-        return safe_resolve(Path(configured).expanduser())
+    for env_name in ("ML_ARCHER_HOME", "CODEX_HOME"):
+        configured = os.environ.get(env_name)
+        if configured:
+            return safe_resolve(Path(configured).expanduser())
 
     profile = os.environ.get("USERPROFILE") or os.environ.get("HOME")
     base = safe_resolve(Path(profile).expanduser()) if profile else safe_resolve(Path.home())
@@ -784,10 +785,10 @@ def run_bootstrap_proofs(
     timeout_seconds: int = 60,
     target: str = "search",
 ) -> dict[str, object]:
-    bootstrap_script = Path(__file__).with_name("bootstrap_proofs.py")
     command = [
         sys.executable,
-        str(bootstrap_script),
+        "-m",
+        "ml_archer.formal.bootstrap_proofs",
         "--workspace",
         str(requested_workspace),
         "--scope",
@@ -838,7 +839,7 @@ def ensure_shared_proofs_workspace(
         return root, selected_scope, status, None
 
     # Automatic repair stays on the lightweight search-ready path. Full
-    # verification setup is an explicit opt-in via setup_plugin.py.
+    # Verification setup is an explicit opt-in via scripts/formal/setup.py.
     bootstrap_payload = run_bootstrap_proofs(
         requested_workspace,
         timeout_seconds=timeout_seconds,

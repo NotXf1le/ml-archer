@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from script_output import append_unique
+from ml_archer.shared.script_output import append_unique
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class SetupPlanner:
     def missing_requirements(payload: dict[str, object], target: str) -> list[str]:
         missing: list[str] = []
         if not bool(payload.get("shared_workspace_writable")):
-            append_unique(missing, "shared CODEX_HOME workspace is not writable")
+            append_unique(missing, "shared ml-archer workspace is not writable")
         if payload.get("lake_path") is None:
             append_unique(missing, "lake is unavailable to the plugin")
         if target == "verify" and payload.get("lean_path") is None:
@@ -149,7 +149,7 @@ class SetupWorkflow:
         if bool(getattr(args, "json")) and not bool(getattr(args, "yes")):
             payload["status"] = "needs_confirmation"
             payload["next_steps"] = [
-                f"Rerun `python scripts/setup_plugin.py --target {target} --yes` when you want to apply setup changes."
+                f"Rerun `python scripts/formal/setup.py --target {target} --allow-network --yes` when you want to apply formal setup changes."
             ]
             return payload, 4
 

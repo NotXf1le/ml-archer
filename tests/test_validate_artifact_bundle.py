@@ -2,21 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch
 
-
-sys.dont_write_bytecode = True
-
-ROOT_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-if str(ROOT_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_SCRIPTS_DIR))
-
-from validate_artifact_bundle import resolve_targets, validate_evidence, validate_report  # noqa: E402
+from ml_archer.formal.validate_formal_bundle import resolve_targets, validate_evidence, validate_report
 
 
 VALID_REPORT = """## Proposed architecture
@@ -126,7 +118,7 @@ class ValidateArtifactBundleTests(unittest.TestCase):
                 json=False,
             )
 
-            with patch("validate_artifact_bundle.plugin_root", return_value=plugin_root):
+            with patch("ml_archer.formal.validate_formal_bundle.plugin_root", return_value=plugin_root):
                 report_path, evidence_path = resolve_targets(args)
 
             self.assertEqual(report_path, workspace_report.resolve())

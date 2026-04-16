@@ -2,21 +2,13 @@
 
 import io
 import json
-import sys
 import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch
 
-
-sys.dont_write_bytecode = True
-
-ROOT_SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-if str(ROOT_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_SCRIPTS_DIR))
-
-import setup_plugin  # noqa: E402
+from ml_archer.formal import setup as formal_setup
 
 
 class SetupPluginTests(unittest.TestCase):
@@ -28,6 +20,7 @@ class SetupPluginTests(unittest.TestCase):
                 target="verify",
                 check_only=True,
                 yes=False,
+                allow_network=False,
                 timeout_seconds=30,
                 json=True,
             )
@@ -48,11 +41,11 @@ class SetupPluginTests(unittest.TestCase):
 
             stdout = io.StringIO()
             with (
-                patch.object(setup_plugin, "parse_args", return_value=args),
-                patch.object(setup_plugin.doctor, "build_payload", return_value=preflight),
+                patch.object(formal_setup, "parse_args", return_value=args),
+                patch.object(formal_setup.doctor, "build_payload", return_value=preflight),
                 patch("sys.stdout", stdout),
             ):
-                exit_code = setup_plugin.main()
+                exit_code = formal_setup.main()
 
             payload = json.loads(stdout.getvalue())
             self.assertEqual(exit_code, 1)
@@ -68,6 +61,7 @@ class SetupPluginTests(unittest.TestCase):
                 target="search",
                 check_only=False,
                 yes=False,
+                allow_network=False,
                 timeout_seconds=30,
                 json=True,
             )
@@ -88,11 +82,11 @@ class SetupPluginTests(unittest.TestCase):
 
             stdout = io.StringIO()
             with (
-                patch.object(setup_plugin, "parse_args", return_value=args),
-                patch.object(setup_plugin.doctor, "build_payload", return_value=preflight),
+                patch.object(formal_setup, "parse_args", return_value=args),
+                patch.object(formal_setup.doctor, "build_payload", return_value=preflight),
                 patch("sys.stdout", stdout),
             ):
-                exit_code = setup_plugin.main()
+                exit_code = formal_setup.main()
 
             payload = json.loads(stdout.getvalue())
             self.assertEqual(exit_code, 4)
@@ -110,6 +104,7 @@ class SetupPluginTests(unittest.TestCase):
                 target="verify",
                 check_only=False,
                 yes=True,
+                allow_network=True,
                 timeout_seconds=30,
                 json=True,
             )
@@ -146,10 +141,10 @@ class SetupPluginTests(unittest.TestCase):
 
             stdout = io.StringIO()
             with (
-                patch.object(setup_plugin, "parse_args", return_value=args),
-                patch.object(setup_plugin.doctor, "build_payload", side_effect=[before, after_toolchain, final, final]),
+                patch.object(formal_setup, "parse_args", return_value=args),
+                patch.object(formal_setup.doctor, "build_payload", side_effect=[before, before, after_toolchain, final, final]),
                 patch.object(
-                    setup_plugin,
+                    formal_setup,
                     "run_json_step",
                     side_effect=[
                         {"success": True, "status": "success", "exit_code": 0},
@@ -158,7 +153,7 @@ class SetupPluginTests(unittest.TestCase):
                 ),
                 patch("sys.stdout", stdout),
             ):
-                exit_code = setup_plugin.main()
+                exit_code = formal_setup.main()
 
             payload = json.loads(stdout.getvalue())
             self.assertEqual(exit_code, 0)

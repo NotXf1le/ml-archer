@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import (
+from ml_archer.shared.common import (
     configure_stdout,
     ensure_shared_proofs_workspace,
     requested_workspace_root,
@@ -30,14 +30,11 @@ def missing_proofs_message(scope: str) -> str:
     shared_root = shared_workspace_root()
     return (
         "No shared Lean proofs project was found. Expected a `proofs/` directory under "
-        f"{shared_root}. Run `python scripts/setup_plugin.py --target search` first."
+        f"{shared_root}. Run `python scripts/formal/setup.py --target search --allow-network --yes` first."
     )
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Search the shared proofs workspace and mathlib for theorem-aware candidate matches."
-    )
+def configure_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("query", help="Literal text to search for.")
     parser.add_argument(
         "--workspace",
@@ -47,7 +44,7 @@ def parse_args() -> argparse.Namespace:
         "--scope",
         choices=["auto", "local", "shared"],
         default="auto",
-        help="Which proofs workspace to search. The plugin is shared-workspace-only; `auto`, `shared`, and legacy `local` all resolve to the shared CODEX_HOME cache.",
+        help="Which proofs workspace to search. The addon is shared-workspace-only; `auto`, `shared`, and legacy `local` all resolve to the shared ml-archer cache.",
     )
     parser.add_argument(
         "--ignore-case",
@@ -77,6 +74,13 @@ def parse_args() -> argparse.Namespace:
         default=60,
         help="Timeout used when the script needs to bootstrap the shared proofs workspace automatically.",
     )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Search the explicit formal proofs workspace and mathlib for theorem-aware candidate matches."
+    )
+    configure_parser(parser)
     return parser.parse_args()
 
 
@@ -307,9 +311,8 @@ def print_text_results(candidates: list[dict[str, object]], raw_hits: list[dict[
             print("No raw text matches found.", file=sys.stderr)
 
 
-def main() -> int:
+def main_from_args(args: argparse.Namespace) -> int:
     configure_stdout()
-    args = parse_args()
     requested_workspace = requested_workspace_root(args.workspace)
     root, selected_scope, workspace_status, bootstrap_payload = ensure_shared_proofs_workspace(
         requested_workspace,
@@ -413,6 +416,10 @@ def main() -> int:
         return 1
 
     return 0
+
+
+def main() -> int:
+    return main_from_args(parse_args())
 
 
 if __name__ == "__main__":

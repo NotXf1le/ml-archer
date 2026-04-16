@@ -137,44 +137,44 @@ class DoctorPayloadBuilder:
             )
         if not payload["proofs_exists"]:
             next_steps.append(
-                "Run `python scripts/setup_plugin.py --target search` to create or refresh the shared proofs project under CODEX_HOME."
+                "Run `python scripts/formal/setup.py --target search --allow-network --yes` to create or refresh the shared proofs project under the ml-archer cache."
             )
         if not payload["shared_workspace_writable"]:
             next_steps.append(
-                "The shared CODEX_HOME cache is not writable. Set CODEX_HOME to a writable directory."
+                "The shared ml-archer cache is not writable. Set `ML_ARCHER_HOME` or `CODEX_HOME` to a writable directory."
             )
         if payload["proofs_exists"] and not payload["lean_toolchain_exists"]:
-            next_steps.append("Run `python scripts/setup_plugin.py --target search` to recreate the shared proofs project metadata.")
+            next_steps.append("Run `python scripts/formal/setup.py --target search --allow-network --yes` to recreate the shared proofs project metadata.")
         if payload["proofs_exists"] and not payload["lakefile_exists"]:
-            next_steps.append("Run `python scripts/setup_plugin.py --target search` to recreate the shared proofs project metadata.")
+            next_steps.append("Run `python scripts/formal/setup.py --target search --allow-network --yes` to recreate the shared proofs project metadata.")
         if payload["lake_path"] is None:
             next_steps.append(
-                "Run `python scripts/setup_plugin.py --target search` so `lake` is available to the plugin."
+                "Run `python scripts/formal/setup.py --target search --allow-network --yes` so `lake` is available to the formal addon."
             )
         if payload["lean_path"] is None:
             next_steps.append(
-                "Run `python scripts/setup_plugin.py --target verify --yes` so `lean` is available to the plugin."
+                "Run `python scripts/formal/setup.py --target verify --allow-network --yes` so `lean` is available to the formal addon."
             )
         if payload["proofs_exists"] and not payload["mathlib_source_exists"]:
             next_steps.append(
-                "Run `python scripts/setup_plugin.py --target search` to populate the shared proofs workspace, fetch mathlib sources, and refresh the package cache."
+                "Run `python scripts/formal/setup.py --target search --allow-network --yes` to populate the shared proofs workspace, fetch mathlib sources, and refresh the package cache."
             )
         if payload["proofs_exists"] and payload["mathlib_source_exists"] and not payload["toolchain_compatible"]:
             next_steps.append(
-                "Run `python scripts/setup_plugin.py --target search` again so it can repair the shared mathlib checkout and repin it to the shared Lean toolchain."
+                "Run `python scripts/formal/setup.py --target search --allow-network --yes` again so it can repair the shared mathlib checkout and repin it to the shared Lean toolchain."
             )
         if payload["proofs_exists"] and library_count == 0:
             next_steps.append(
-                "Run `python scripts/setup_plugin.py --target verify` when you want compiled package libraries for Lean verification."
+                "Run `python scripts/formal/setup.py --target verify --allow-network --yes` when you want compiled package libraries for Lean verification."
             )
         if payload["proofs_exists"] and payload["mathlib_source_exists"] and not payload["mathlib_artifact_exists"]:
             next_steps.append(
-                "Run `python scripts/setup_plugin.py --target verify` to fetch or build `Mathlib.olean` for the shared proofs workspace."
+                "Run `python scripts/formal/setup.py --target verify --allow-network --yes` to fetch or build `Mathlib.olean` for the shared proofs workspace."
             )
         if payload["verification_smoke_checked"] and payload["verification_smoke_success"] is False:
             next_steps.append(
-                "Run `python scripts/setup_plugin.py --target verify --yes` again. If the shared environment still fails the import smoke test, inspect `python scripts/lean_check.py --json` because the cached Mathlib build is incomplete."
+                "Run `python scripts/formal/setup.py --target verify --allow-network --yes` again. If the shared environment still fails the import smoke test, inspect `python scripts/formal/lean_check.py --json` because the cached Mathlib build is incomplete."
             )
         if payload["proofs_exists"] and not payload["proof_scratch_exists"]:
-            next_steps.append("Run `python scripts/setup_plugin.py --target search` to recreate `proofs/ProofScratch.lean` in the shared workspace.")
+            next_steps.append("Run `python scripts/formal/setup.py --target search --allow-network --yes` to recreate `proofs/ProofScratch.lean` in the shared workspace.")
         return next_steps
