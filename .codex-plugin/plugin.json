@@ -1,7 +1,7 @@
-﻿{
+{
   "name": "mathlib-ml-arch",
-  "version": "1.2.0",
-  "description": "Keeps ML architecture reviews honest about verified mathlib support, engineering inference, and empirical gaps.",
+  "version": "1.3.0",
+  "description": "Keeps ML architecture reviews honest about verified mathlib support, structural type/gradient risks, engineering inference, and empirical gaps.",
   "author": {
     "name": "Felix"
   },
@@ -10,13 +10,15 @@
     "mathlib",
     "architecture",
     "machine-learning",
-    "audit"
+    "audit",
+    "tomography",
+    "typed-dimensions"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Mathlib ML Architect",
-    "shortDescription": "Separate verified support from engineering and empirical claims",
-    "longDescription": "Supports one product flow: inspect readiness, prepare the shared Lean workspace, search candidate mathlib facts, verify the local claim, and validate the review bundle.",
+    "shortDescription": "Separate structural findings, verified support, and empirical claims",
+    "longDescription": "Supports two companion flows: typed architecture tomography for structural analysis, and mathlib-backed verification for locally checkable formal subclaims. Structural findings never count as Lean verification.",
     "developerName": "Felix",
     "category": "Productivity",
     "capabilities": [
@@ -24,9 +26,9 @@
       "Write"
     ],
     "defaultPrompt": [
+      "Decompose this ML architecture into typed states, matrices, invariants, shortcut risks, and formalization candidates",
       "Check whether this workspace can reach a locally verified mathlib claim",
-      "Set up shared theorem search or Lean verification for this workspace",
-      "Audit this ML architecture and separate verified support, engineering inference, and empirical gaps"
+      "Audit this ML architecture and separate structural findings, verified support, engineering inference, and empirical gaps"
     ]
   }
 }

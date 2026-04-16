@@ -1,4 +1,4 @@
-﻿---
+---
 name: mathlib-ml-arch
 description: Ground ML architecture reasoning in Lean mathlib evidence. Use when the task involves ML architecture proposals, invariants, probabilistic semantics, linear algebra correctness, numerical stability, optimizer-side reasoning, or any mathematical claim that should be separated into formal support, engineering inference, and empirical gaps.
 ---
@@ -15,6 +15,8 @@ Use this skill when the user needs one honest split:
 
 1. Read `../../references/architecture_contract.md` first.
 2. Read `../../references/mathlib_scope.md` when you need theorem-family boundaries or search strategy.
+3. If the request originated from `typed-architecture-tomography`, treat its `formalization_candidates`
+   as search seeds only. They are not evidence.
 
 ## Official Workflow
 
@@ -49,6 +51,12 @@ python "../../scripts/lean_check.py" --json
 ```bash
 python "../../scripts/validate_artifact_bundle.py" --bundle-dir "<dir>"
 ```
+
+## Companion Handoff Rules
+
+- Preserve the original structural findings as structural findings.
+- Upgrade a subclaim to `Formal support` only after local Lean verification succeeds.
+- Keep the written answer and the formal artifact bundle aligned with `architecture_contract.md`.
 
 ## Hard Rules
 
