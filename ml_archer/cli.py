@@ -3,11 +3,6 @@ from __future__ import annotations
 import argparse
 from typing import Sequence
 
-from ml_archer.formal import doctor as formal_doctor
-from ml_archer.formal import lean_check
-from ml_archer.formal import search_mathlib
-from ml_archer.formal import setup as formal_setup
-from ml_archer.formal import validate_formal_bundle
 from ml_archer.tomography import validate_bundle as validate_tomography_bundle
 
 
@@ -26,32 +21,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_tomography_bundle.configure_parser(tomography_validate)
     tomography_validate.set_defaults(handler=validate_tomography_bundle.main_from_args)
-
-    formal = subparsers.add_parser("formal", help="Explicit Lean/mathlib addon.")
-    formal_subparsers = formal.add_subparsers(dest="formal_command", required=True)
-
-    formal_doctor_parser = formal_subparsers.add_parser("doctor", help="Inspect formal addon readiness.")
-    formal_doctor.configure_parser(formal_doctor_parser)
-    formal_doctor_parser.set_defaults(handler=formal_doctor.main_from_args)
-
-    formal_setup_parser = formal_subparsers.add_parser("setup", help="Prepare the formal addon workspace.")
-    formal_setup.configure_parser(formal_setup_parser)
-    formal_setup_parser.set_defaults(handler=formal_setup.main_from_args)
-
-    formal_search_parser = formal_subparsers.add_parser("search", help="Search theorem candidates in mathlib.")
-    search_mathlib.configure_parser(formal_search_parser)
-    formal_search_parser.set_defaults(handler=search_mathlib.main_from_args)
-
-    formal_check_parser = formal_subparsers.add_parser("check", help="Run Lean verification against ProofScratch.")
-    lean_check.configure_parser(formal_check_parser)
-    formal_check_parser.set_defaults(handler=lean_check.main_from_args)
-
-    formal_validate_parser = formal_subparsers.add_parser(
-        "validate-bundle",
-        help="Validate a formal evidence bundle.",
-    )
-    validate_formal_bundle.configure_parser(formal_validate_parser)
-    formal_validate_parser.set_defaults(handler=validate_formal_bundle.main_from_args)
 
     return parser
 

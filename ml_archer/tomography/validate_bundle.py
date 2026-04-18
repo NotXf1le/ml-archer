@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Iterable
 
-from ml_archer.formal.artifact_bundle_service import ArtifactBundleValidator
 from ml_archer.shared.script_output import PayloadEmitter
 
 REQUIRED_SECTIONS = [
@@ -17,7 +17,6 @@ REQUIRED_SECTIONS = [
     "Shortcut and path dominance",
     "Invariants and singularities",
     "Train/infer congruence",
-    "Formalization candidates",
     "Empirical-only claims",
     "Risks and redesign guidance",
 ]
@@ -34,7 +33,6 @@ REQUIRED_TOP_LEVEL_FIELDS = [
     "invariants",
     "train_infer_congruence",
     "findings",
-    "formalization_candidates",
     "empirical_only_claims",
 ]
 
@@ -88,17 +86,6 @@ REQUIRED_FINDING_FIELDS = [
     "recommended_action",
 ]
 
-REQUIRED_FORMALIZATION_FIELDS = [
-    "candidate_id",
-    "natural_language_claim",
-    "reason_it_is_formalizable",
-    "target_backend",
-    "theorem_family",
-    "search_terms",
-    "suggested_import_nouns",
-    "side_conditions",
-]
-
 REQUIRED_EMPIRICAL_FIELDS = [
     "claim_id",
     "claim",
@@ -106,12 +93,6 @@ REQUIRED_EMPIRICAL_FIELDS = [
     "required_evidence",
 ]
 
-FORBIDDEN_KEYS = {"verified_in_lean", "verification_method", "claim_label"}
-FORBIDDEN_FORMAL_LABELS = {
-    "Formal support",
-    "Partial formal support",
-    "No direct formal support found in mathlib",
-}
 VALID_OPERATOR_MODES = {"train", "infer", "both"}
 VALID_FINDING_LABELS = {
     "Structural finding",
@@ -120,7 +101,6 @@ VALID_FINDING_LABELS = {
     "Gradient reachability finding",
     "Shortcut risk",
     "Train/infer mismatch risk",
-    "Formalization candidate",
     "Empirical-only claim",
 }
 VALID_CONFIDENCE = {"high", "medium", "low"}
@@ -218,39 +198,66 @@ def resolve_targets(args: argparse.Namespace) -> tuple[Path | None, Path | None]
     if args.bundle_dir:
         bundle_dir = Path(args.bundle_dir).expanduser().resolve()
         report = report_in_bundle_dir(bundle_dir)
-        tomography = Path(args.tomography).expanduser().resolve() if args.tomography else bundle_dir / "tomography.json"
+        tomography = (
+            Path(args.tomography).expanduser().resolve() if args.tomography else bundle_dir / "tomography.json"
+        )
         return report, tomography
 
     if args.report:
         report = Path(args.report).expanduser().resolve()
-        tomography = Path(args.tomography).expanduser().resolve() if args.tomography else report.with_name("tomography.json")
+        tomography = (
+            Path(args.tomography).expanduser().resolve()
+            if args.tomography
+            else report.with_name("tomography.json")
+        )
         return report, tomography
 
     if args.latest:
-        workspace_root = Path(args.workspace).expanduser().resolve() if args.workspace else default_workspace_root()
+        workspace_root = (
+            Path(args.workspace).expanduser().resolve() if args.workspace else default_workspace_root()
+        )
         report = latest_report(candidate_report_dirs(workspace_root))
         if report is None:
             return None, None
-        tomography = Path(args.tomography).expanduser().resolve() if args.tomography else report.with_name("tomography.json")
+        tomography = (
+            Path(args.tomography).expanduser().resolve()
+            if args.tomography
+            else report.with_name("tomography.json")
+        )
         return report, tomography
 
     return None, None
 
 
-def _report_validator() -> ArtifactBundleValidator:
-    return ArtifactBundleValidator(
-        required_sections=REQUIRED_SECTIONS,
-        required_evidence_fields=[],
-        required_side_condition_fields=[],
-    )
-
-
 def heading_positions(report_text: str) -> dict[str, int]:
-    return _report_validator().heading_positions(report_text)
+    positions: dict[str, int] = {}
+    for section in REQUIRED_SECTIONS:
+        match = re.search(rf"^\s{{0,3}}##\s+{re.escape(section)}\s*$", report_text, flags=re.MULTILINE)
+        positions[section] = match.start() if match else -1
+    return positions
 
 
 def validate_report(report_path: Path) -> tuple[list[str], dict[str, int]]:
-    return _report_validator().validate_report(report_path)
+    issues: list[str] = []
+    if not report_path.exists():
+        return [f"Missing report file: {report_path}"], {}
+
+    report_text = report_path.read_text(encoding="utf-8")
+    positions = heading_positions(report_text)
+    missing = [section for section, position in positions.items() if position < 0]
+    for section in missing:
+        issues.append(f"Missing section: {section}")
+
+    last_position = -1
+    for section in REQUIRED_SECTIONS:
+        position = positions.get(section, -1)
+        if position < 0:
+            continue
+        if position < last_position:
+            issues.append(f"Section out of order: {section}")
+        last_position = position
+
+    return issues, positions
 
 
 def _missing_or_blank(value: object) -> bool:
@@ -271,19 +278,6 @@ def _require_fields(record: dict[str, object], fields: Iterable[str], prefix: st
     return issues
 
 
-def _scan_forbidden_keys(value: object, prefix: str = "$") -> list[str]:
-    issues: list[str] = []
-    if isinstance(value, dict):
-        for key, nested in value.items():
-            if key in FORBIDDEN_KEYS:
-                issues.append(f"Forbidden formal key '{key}' found at {prefix}.{key}.")
-            issues.extend(_scan_forbidden_keys(nested, f"{prefix}.{key}"))
-    elif isinstance(value, list):
-        for index, nested in enumerate(value):
-            issues.extend(_scan_forbidden_keys(nested, f"{prefix}[{index}]"))
-    return issues
-
-
 def validate_tomography(tomography_path: Path) -> tuple[list[str], dict[str, object] | None]:
     if not tomography_path.exists():
         return [f"Missing tomography file: {tomography_path}"], None
@@ -297,7 +291,6 @@ def validate_tomography(tomography_path: Path) -> tuple[list[str], dict[str, obj
         return ["tomography.json must be a JSON object."], None
 
     issues: list[str] = []
-    issues.extend(_scan_forbidden_keys(payload))
 
     for field in REQUIRED_TOP_LEVEL_FIELDS:
         if _missing_or_blank(payload.get(field)):
@@ -342,7 +335,9 @@ def validate_tomography(tomography_path: Path) -> tuple[list[str], dict[str, obj
                 if not isinstance(row, dict):
                     issues.append(f"operator_state_matrix.rows[{index}] must be an object.")
                     continue
-                issues.extend(_require_fields(row, ["operator_id", "cells"], f"operator_state_matrix.rows[{index}]"))
+                issues.extend(
+                    _require_fields(row, ["operator_id", "cells"], f"operator_state_matrix.rows[{index}]")
+                )
                 cells = row.get("cells")
                 if cells is not None and not isinstance(cells, dict):
                     issues.append(f"operator_state_matrix.rows[{index}].cells must be an object.")
@@ -359,7 +354,13 @@ def validate_tomography(tomography_path: Path) -> tuple[list[str], dict[str, obj
                 if not isinstance(row, dict):
                     issues.append(f"supervision_matrix.rows[{index}] must be an object.")
                     continue
-                issues.extend(_require_fields(row, ["loss_id", "cells", "notes"], f"supervision_matrix.rows[{index}]"))
+                issues.extend(
+                    _require_fields(
+                        row,
+                        ["loss_id", "cells", "notes"],
+                        f"supervision_matrix.rows[{index}]",
+                    )
+                )
                 cells = row.get("cells")
                 if cells is not None and not isinstance(cells, dict):
                     issues.append(f"supervision_matrix.rows[{index}].cells must be an object.")
@@ -415,11 +416,8 @@ def validate_tomography(tomography_path: Path) -> tuple[list[str], dict[str, obj
                 continue
             issues.extend(_require_fields(record, REQUIRED_FINDING_FIELDS, f"findings[{index}]"))
             label = record.get("finding_label")
-            if isinstance(label, str):
-                if label in FORBIDDEN_FORMAL_LABELS:
-                    issues.append(f"findings[{index}] uses forbidden formal label '{label}'.")
-                elif label not in VALID_FINDING_LABELS:
-                    issues.append(f"findings[{index}] has unknown finding_label '{label}'.")
+            if isinstance(label, str) and label not in VALID_FINDING_LABELS:
+                issues.append(f"findings[{index}] has unknown finding_label '{label}'.")
             severity = record.get("severity")
             if isinstance(severity, str) and severity not in VALID_SEVERITY:
                 issues.append(f"findings[{index}] has invalid severity '{severity}'.")
@@ -432,29 +430,15 @@ def validate_tomography(tomography_path: Path) -> tuple[list[str], dict[str, obj
     else:
         issues.append("'findings' must be an array.")
 
-    candidates = payload.get("formalization_candidates")
-    if isinstance(candidates, list):
-        for index, record in enumerate(candidates, start=1):
-            if not isinstance(record, dict):
-                issues.append(f"formalization_candidates[{index}] must be an object.")
-                continue
-            issues.extend(
-                _require_fields(
-                    record,
-                    REQUIRED_FORMALIZATION_FIELDS,
-                    f"formalization_candidates[{index}]",
-                )
-            )
-    else:
-        issues.append("'formalization_candidates' must be an array.")
-
     empirical = payload.get("empirical_only_claims")
     if isinstance(empirical, list):
         for index, record in enumerate(empirical, start=1):
             if not isinstance(record, dict):
                 issues.append(f"empirical_only_claims[{index}] must be an object.")
                 continue
-            issues.extend(_require_fields(record, REQUIRED_EMPIRICAL_FIELDS, f"empirical_only_claims[{index}]"))
+            issues.extend(
+                _require_fields(record, REQUIRED_EMPIRICAL_FIELDS, f"empirical_only_claims[{index}]")
+            )
     else:
         issues.append("'empirical_only_claims' must be an array.")
 
@@ -466,14 +450,22 @@ def summary_from_payload(payload: dict[str, object] | None) -> dict[str, object]
         return {
             "typed_state_count": 0,
             "finding_count": 0,
-            "formalization_candidate_count": 0,
+            "empirical_only_claim_count": 0,
             "congruence_status": None,
         }
     return {
-        "typed_state_count": len(payload.get("typed_states", [])) if isinstance(payload.get("typed_states"), list) else 0,
-        "finding_count": len(payload.get("findings", [])) if isinstance(payload.get("findings"), list) else 0,
-        "formalization_candidate_count": len(payload.get("formalization_candidates", [])) if isinstance(payload.get("formalization_candidates"), list) else 0,
-        "congruence_status": payload.get("train_infer_congruence", {}).get("status") if isinstance(payload.get("train_infer_congruence"), dict) else None,
+        "typed_state_count": len(payload.get("typed_states", []))
+        if isinstance(payload.get("typed_states"), list)
+        else 0,
+        "finding_count": len(payload.get("findings", []))
+        if isinstance(payload.get("findings"), list)
+        else 0,
+        "empirical_only_claim_count": len(payload.get("empirical_only_claims", []))
+        if isinstance(payload.get("empirical_only_claims"), list)
+        else 0,
+        "congruence_status": payload.get("train_infer_congruence", {}).get("status")
+        if isinstance(payload.get("train_infer_congruence"), dict)
+        else None,
     }
 
 
@@ -486,7 +478,7 @@ def print_human(payload: dict[str, object]) -> None:
         print(f"tomography: {payload['tomography_path']}")
     print(f"typed states: {payload.get('typed_state_count', 0)}")
     print(f"findings: {payload.get('finding_count', 0)}")
-    print(f"formalization candidates: {payload.get('formalization_candidate_count', 0)}")
+    print(f"empirical-only claims: {payload.get('empirical_only_claim_count', 0)}")
     if payload.get("congruence_status"):
         print(f"train/infer congruence: {payload['congruence_status']}")
     if payload["issues"]:

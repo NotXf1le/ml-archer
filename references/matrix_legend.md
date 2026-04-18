@@ -5,7 +5,7 @@ Use these canonical tokens unless the user explicitly needs different notation.
 ## Typed-Dimension Tuple
 
 ```text
-τ(x) = (shape, space, geometry, semantic_role, time_role, persistence)
+tau(x) = (shape, space, geometry, semantic_role, time_role, persistence)
 ```
 
 ## Canonical Semantic Roles
@@ -50,16 +50,16 @@ Examples:
 
 Use one code or a comma-separated set of codes per cell.
 
-- `R` — read
-- `W` — overwrite or write
-- `U` — update using the previous value and a new signal
-- `P` — produce or predict
-- `T` — target or supervise
-- `C` — cast, map, or transport between spaces
-- `M` — merge, add, concatenate, or compose
-- `D` — detach or stop-gradient
-- `.` — no direct relation
-- `!` — illegal or suspicious relation unless extra structure is supplied
+- `R` - read
+- `W` - overwrite or write
+- `U` - update using the previous value and a new signal
+- `P` - produce or predict
+- `T` - target or supervise
+- `C` - cast, map, or transport between spaces
+- `M` - merge, add, concatenate, or compose
+- `D` - detach or stop-gradient
+- `.` - no direct relation
+- `!` - illegal or suspicious relation unless extra structure is supplied
 
 ## Supervision Matrix Statuses
 
@@ -94,7 +94,6 @@ Use one of these exact values in `tomography.json`:
 - `Gradient reachability finding`
 - `Shortcut risk`
 - `Train/infer mismatch risk`
-- `Formalization candidate`
 - `Empirical-only claim`
 
 ## Severity Scale

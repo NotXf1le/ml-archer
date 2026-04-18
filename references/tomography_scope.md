@@ -11,7 +11,6 @@ Use this file to decide what the structural layer may and may not claim.
 - Gradient disconnects, detachments, logged-only losses, and dead branches.
 - Shortcut/bypass paths that threaten the intended bottleneck.
 - Train/infer path mismatch.
-- Local formalization candidates that may be handed to the mathlib skill later.
 
 ## What Typed Architecture Tomography Cannot Prove
 

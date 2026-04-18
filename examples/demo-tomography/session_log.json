@@ -1,7 +1,0 @@
-{
-  "analysis_mode": "demo_fixture",
-  "notes": [
-    "Example only; not a live architecture audit.",
-    "Structural findings are intentionally kept separate from Lean verification."
-  ]
-}

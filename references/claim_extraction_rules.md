@@ -11,7 +11,6 @@ Use this file to turn architecture prose, equations, or code into atomic structu
 5. Split broad claims into local atomic claims.
 6. Mark each atomic claim as one of:
    - structural finding
-   - formalization candidate
    - empirical-only claim
 
 ## Atomic Claim Families
@@ -22,7 +21,7 @@ Use for merges, EMA updates, residual adds, concatenations, projections, and att
 
 Examples:
 
-- `K' <- EMA(K, q)` requires either semantic-role compatibility or an explicit map `φ: query -> persistent_key`.
+- `K' <- EMA(K, phi(q_ctx))` requires either semantic-role compatibility or an explicit map `phi: query -> persistent_key`.
 - `x + y` requires more than shape equality; space, geometry, and role must also match or be bridged.
 
 ### 2. Separation Claims
@@ -85,21 +84,18 @@ Examples:
 - train updates persistent memory, infer uses frozen memory;
 - train path observes targets unavailable at inference.
 
-## Formalization Candidate Rule
+## Structural Finding Rule
 
-Promote an atomic claim to `Formalization candidate` only when it is narrow, local, and plausibly covered by algebra, linear algebra, normed spaces, probability, or analysis.
+Keep an atomic claim in `structural finding` when it concerns typed states, compatibility,
+preconditions, invariants, reachability, shortcut risk, or train/infer congruence.
 
-The candidate must include:
-
-- a precise natural-language claim;
-- stated side conditions;
-- theorem family hints;
-- search terms;
-- the reason the claim is formalizable.
+The finding should stay local, explicit about boundaries, and tied to concrete equations,
+code paths, or clearly marked assumptions.
 
 ## Empirical-Only Rule
 
-Any claim about benchmark performance, training success in a concrete stack, hardware cost, deployment speed, dataset fit, or model-family superiority belongs in `empirical_only_claims`.
+Any claim about benchmark performance, training success in a concrete stack, hardware cost,
+deployment speed, dataset fit, or model-family superiority belongs in `empirical_only_claims`.
 
 ## Missing Information Rule
 

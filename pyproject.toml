@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ml-archer"
-version = "2.0.0"
-description = "Tomography-first ML architecture analysis with an explicit Lean/mathlib addon."
+version = "3.0.0"
+description = "Tomography-first ML architecture analysis focused on typed architecture review."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }

@@ -38,10 +38,6 @@ VALID_REPORT = """## Architecture decomposition
 
 - Example.
 
-## Formalization candidates
-
-- Example.
-
 ## Empirical-only claims
 
 - Example.
@@ -75,7 +71,7 @@ class ValidateTomographyBundleTests(unittest.TestCase):
             "operators": [
                 {
                     "operator_id": "key_update",
-                    "equation_or_rule": "K' <- EMA(K, φ(q_ctx))",
+                    "equation_or_rule": "K' <- EMA(K, phi(q_ctx))",
                     "purpose": "Refresh persistent keys.",
                     "reads": ["slot_key", "q_ctx"],
                     "writes": ["slot_key_next"],
@@ -104,7 +100,7 @@ class ValidateTomographyBundleTests(unittest.TestCase):
                     "invariant_id": "inv_1",
                     "statement": "Key/query separation is preserved.",
                     "statuses": {"key_update": "requires_precondition"},
-                    "boundary": "Needs an explicit map φ from query-space to key-space.",
+                    "boundary": "Needs an explicit map phi from query-space to key-space.",
                 }
             ],
             "train_infer_congruence": {
@@ -124,19 +120,7 @@ class ValidateTomographyBundleTests(unittest.TestCase):
                     "confidence": "high",
                     "evidence_refs": ["key_update", "inv_1"],
                     "boundary": "The report does not prove runtime failure.",
-                    "recommended_action": "Insert and document φ: query -> persistent_key.",
-                }
-            ],
-            "formalization_candidates": [
-                {
-                    "candidate_id": "fc_1",
-                    "natural_language_claim": "Projection used in the key normalizer is idempotent.",
-                    "reason_it_is_formalizable": "This is a local linear-algebraic claim.",
-                    "target_backend": "mathlib",
-                    "theorem_family": "projection/idempotence",
-                    "search_terms": ["projection idempotent", "orthogonal projection"],
-                    "suggested_import_nouns": ["LinearMap", "Submodule", "Projection"],
-                    "side_conditions": ["projection target is a well-defined subspace"],
+                    "recommended_action": "Insert and document phi: query -> persistent_key.",
                 }
             ],
             "empirical_only_claims": [
@@ -153,24 +137,16 @@ class ValidateTomographyBundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             bundle = Path(tmp)
             (bundle / "report.md").write_text(VALID_REPORT, encoding="utf-8")
-            (bundle / "tomography.json").write_text(json.dumps(self.make_payload(), indent=2), encoding="utf-8")
+            (bundle / "tomography.json").write_text(
+                json.dumps(self.make_payload(), indent=2),
+                encoding="utf-8",
+            )
 
             report_issues, _ = validate_report(bundle / "report.md")
             tomography_issues, _ = validate_tomography(bundle / "tomography.json")
 
             self.assertFalse(report_issues)
             self.assertFalse(tomography_issues)
-
-    def test_forbidden_formal_key_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            bundle = Path(tmp)
-            bad = self.make_payload()
-            bad["findings"][0]["verified_in_lean"] = False
-            (bundle / "tomography.json").write_text(json.dumps(bad, indent=2), encoding="utf-8")
-
-            issues, _ = validate_tomography(bundle / "tomography.json")
-
-            self.assertTrue(any("verified_in_lean" in issue for issue in issues))
 
     def test_missing_top_level_field_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

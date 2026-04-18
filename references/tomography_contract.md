@@ -7,7 +7,7 @@ Use this output contract whenever the `typed-architecture-tomography` skill is a
 Assign each architecture state a typed-dimension tuple:
 
 ```text
-τ(x) = (shape, space, geometry, semantic_role, time_role, persistence)
+tau(x) = (shape, space, geometry, semantic_role, time_role, persistence)
 ```
 
 Interpret these dimensions strictly:
@@ -15,7 +15,7 @@ Interpret these dimensions strictly:
 - `shape` checks tensor/layout compatibility.
 - `space` checks the carrier set or codomain.
 - `geometry` checks metric, simplex, normalization regime, manifold chart, or comparison structure.
-- `semantic_role` checks what the state *means*.
+- `semantic_role` checks what the state means.
 - `time_role` checks whether the state is current, next-step, target, or predicted.
 - `persistence` checks whether the state is ephemeral, persistent, buffered, parameterized, observed, or predicted.
 
@@ -30,9 +30,8 @@ Identical shape is never enough to justify mixing states.
 5. Shortcut and path dominance
 6. Invariants and singularities
 7. Train/infer congruence
-8. Formalization candidates
-9. Empirical-only claims
-10. Risks and redesign guidance
+8. Empirical-only claims
+9. Risks and redesign guidance
 
 ## Allowed Finding Labels
 
@@ -44,21 +43,7 @@ Use one of these exact labels:
 - `Gradient reachability finding`
 - `Shortcut risk`
 - `Train/infer mismatch risk`
-- `Formalization candidate`
 - `Empirical-only claim`
-
-## Forbidden Formal Labels and Keys
-
-Do **not** use any of the following inside the tomography bundle:
-
-- `Formal support`
-- `Partial formal support`
-- `No direct formal support found in mathlib`
-- `verified_in_lean`
-- `verification_method`
-- `claim_label`
-
-Those belong to the formal verification contract, not the structural one.
 
 ## Bundle Format
 
@@ -85,7 +70,6 @@ Validate the bundle explicitly with:
 - `invariants`
 - `train_infer_congruence`
 - `findings`
-- `formalization_candidates`
 - `empirical_only_claims`
 
 ## Required `typed_states` Fields
@@ -196,19 +180,6 @@ Each finding record must include:
 
 `confidence` should be one of `high`, `medium`, or `low`.
 
-## Required `formalization_candidates` Fields
-
-Each candidate must include:
-
-- `candidate_id`
-- `natural_language_claim`
-- `reason_it_is_formalizable`
-- `target_backend`
-- `theorem_family`
-- `search_terms`
-- `suggested_import_nouns`
-- `side_conditions`
-
 ## Required `empirical_only_claims` Fields
 
 Each empirical-only record must include:
@@ -231,5 +202,4 @@ If formulas, code paths, or losses are missing, encode that explicitly in:
 
 - Do not present structural cleanliness as benchmark evidence.
 - Do not present a local invariant as proof of end-to-end model quality.
-- Do not present a formalization candidate as a verified theorem.
 - Do not treat absence of a detected shortcut as proof that none exists.
