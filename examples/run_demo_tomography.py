@@ -41,11 +41,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_validation(output_dir: Path) -> dict[str, object]:
-    validator = plugin_root() / "scripts" / "validate_tomography_bundle.py"
     result = subprocess.run(
-        [sys.executable, str(validator), "--bundle-dir", str(output_dir), "--json"],
+        [sys.executable, "-m", "ml_archer.cli", "tomography", "validate", "--bundle-dir", str(output_dir), "--json"],
         check=False,
         capture_output=True,
+        cwd=plugin_root(),
         text=True,
         encoding="utf-8",
         errors="replace",

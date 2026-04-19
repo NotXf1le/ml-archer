@@ -31,4 +31,4 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
-      - run: pytest -q tests/test_validate_artifact_bundle.py tests/test_validate_tomography_bundle.py
+      - run: pytest -q tests/test_script_entrypoints.py tests/test_validate_tomography_bundle.py

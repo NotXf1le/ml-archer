@@ -1,6 +1,6 @@
 ---
 name: typed-architecture-tomography
-description: Analyze an ML architecture via typed states, operator-state matrices, supervision reachability, shortcut paths, invariants, singularities, and train/infer congruence.
+description: Use when auditing an ML architecture through typed states, operator-state matrices, reachability, shortcut paths, invariants, singularities, and train/infer congruence.
 ---
 
 # Typed Architecture Tomography

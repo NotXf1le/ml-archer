@@ -1,0 +1,280 @@
+{
+  "architecture_name": "Typed slot retrieval controller",
+  "architecture_summary": "A slot-based controller that keeps key, query, and content roles separate while exposing one risky residual bypass.",
+  "assumptions": [
+    "The example uses an explicit map phi from query-space to key-space.",
+    "The residual branch is present both during training and inference."
+  ],
+  "typed_states": [
+    {
+      "state_id": "slot_key",
+      "symbol": "K",
+      "semantic_role": "persistent_key",
+      "shape": "B x S x D",
+      "space": "R^D",
+      "geometry": "euclidean",
+      "time_role": "t",
+      "persistence": "persistent",
+      "producer_ops": [
+        "key_update"
+      ],
+      "consumer_ops": [
+        "router"
+      ]
+    },
+    {
+      "state_id": "q_slot",
+      "symbol": "q",
+      "semantic_role": "query",
+      "shape": "B x G x D",
+      "space": "R^D",
+      "geometry": "euclidean",
+      "time_role": "t",
+      "persistence": "ephemeral",
+      "producer_ops": [
+        "query_encoder"
+      ],
+      "consumer_ops": [
+        "router",
+        "key_update"
+      ]
+    },
+    {
+      "state_id": "slot_memory",
+      "symbol": "M",
+      "semantic_role": "content",
+      "shape": "B x S x D",
+      "space": "R^D",
+      "geometry": "bounded_ball",
+      "time_role": "t",
+      "persistence": "persistent",
+      "producer_ops": [
+        "writer"
+      ],
+      "consumer_ops": [
+        "reader",
+        "align_loss"
+      ]
+    },
+    {
+      "state_id": "z_residual",
+      "symbol": "z_r",
+      "semantic_role": "residual",
+      "shape": "B x D",
+      "space": "R^D",
+      "geometry": "euclidean",
+      "time_role": "t",
+      "persistence": "ephemeral",
+      "producer_ops": [
+        "bypass_encoder"
+      ],
+      "consumer_ops": [
+        "decoder"
+      ]
+    }
+  ],
+  "operators": [
+    {
+      "operator_id": "router",
+      "equation_or_rule": "pi <- softmax(score(q_slot, slot_key))",
+      "purpose": "Read addressing weights.",
+      "reads": [
+        "q_slot",
+        "slot_key"
+      ],
+      "writes": [
+        "routing_weights"
+      ],
+      "mode": "both"
+    },
+    {
+      "operator_id": "writer",
+      "equation_or_rule": "slot_memory' <- write(slot_memory, pi, z_write)",
+      "purpose": "Update content memory.",
+      "reads": [
+        "slot_memory",
+        "routing_weights",
+        "z_write"
+      ],
+      "writes": [
+        "slot_memory_next"
+      ],
+      "mode": "both"
+    },
+    {
+      "operator_id": "key_update",
+      "equation_or_rule": "K' <- EMA(K, phi(q_ctx))",
+      "purpose": "Refresh persistent keys.",
+      "reads": [
+        "slot_key",
+        "q_slot"
+      ],
+      "writes": [
+        "slot_key_next"
+      ],
+      "mode": "both"
+    }
+  ],
+  "operator_state_matrix": {
+    "states": [
+      "slot_key",
+      "q_slot",
+      "slot_memory",
+      "z_residual"
+    ],
+    "rows": [
+      {
+        "operator_id": "router",
+        "cells": {
+          "slot_key": "R",
+          "q_slot": "R",
+          "slot_memory": ".",
+          "z_residual": "."
+        }
+      },
+      {
+        "operator_id": "writer",
+        "cells": {
+          "slot_key": ".",
+          "q_slot": ".",
+          "slot_memory": "U",
+          "z_residual": "."
+        }
+      },
+      {
+        "operator_id": "key_update",
+        "cells": {
+          "slot_key": "U",
+          "q_slot": "R,C",
+          "slot_memory": ".",
+          "z_residual": "."
+        }
+      }
+    ]
+  },
+  "supervision_matrix": {
+    "rows": [
+      {
+        "loss_id": "align_loss",
+        "cells": {
+          "slot_key": "indirect",
+          "q_slot": "indirect",
+          "slot_memory": "direct",
+          "z_residual": "none"
+        },
+        "notes": "Content is directly supervised; keys are only affected through the updater."
+      },
+      {
+        "loss_id": "decode_loss",
+        "cells": {
+          "slot_key": "indirect",
+          "q_slot": "indirect",
+          "slot_memory": "indirect",
+          "z_residual": "direct"
+        },
+        "notes": "The bypass branch reaches the decoder directly."
+      }
+    ]
+  },
+  "shortcut_paths": [
+    {
+      "shortcut_id": "shortcut_decoder_bypass",
+      "claim_or_output": "decoder output",
+      "intended_path": "encoder -> routing -> slot_memory -> decoder",
+      "shortcut_path": "bypass_encoder -> z_residual -> decoder",
+      "status": "present",
+      "risk_summary": "The residual path can weaken the intended memory bottleneck."
+    }
+  ],
+  "invariants": [
+    {
+      "invariant_id": "key_query_separation",
+      "statement": "Persistent key state is not mixed with live query state without an explicit cast.",
+      "statuses": {
+        "router": "preserved",
+        "key_update": "requires_precondition"
+      },
+      "boundary": "The update is structurally safe only if phi is explicit and documented."
+    },
+    {
+      "invariant_id": "direction_normalization_defined",
+      "statement": "Direction normalization is only defined when ||x|| > 0.",
+      "statuses": {
+        "writer": "requires_precondition"
+      },
+      "boundary": "The example mentions normalization but does not prove the nonzero condition."
+    }
+  ],
+  "train_infer_congruence": {
+    "status": "partial_mismatch",
+    "train_path": "teacher-forced context updates key_update during training",
+    "infer_path": "self-generated context updates key_update during inference",
+    "mismatch_points": [
+      "teacher forcing is unavailable at inference"
+    ],
+    "notes": "The updater is not fully congruent across train and inference."
+  },
+  "findings": [
+    {
+      "finding_id": "finding_key_cast",
+      "finding_label": "Type violation risk",
+      "severity": "high",
+      "summary": "The key updater is only structurally valid if query-space is explicitly transported into key-space.",
+      "basis": "explicit_equation",
+      "confidence": "high",
+      "evidence_refs": [
+        "key_update",
+        "key_query_separation"
+      ],
+      "boundary": "This is a structural risk, not a proof of benchmark failure.",
+      "recommended_action": "Make phi explicit in the architecture spec and code boundary."
+    },
+    {
+      "finding_id": "finding_bypass",
+      "finding_label": "Shortcut risk",
+      "severity": "high",
+      "summary": "The residual bypass gives the decoder a direct route around the intended memory bottleneck.",
+      "basis": "textual_description",
+      "confidence": "medium",
+      "evidence_refs": [
+        "shortcut_decoder_bypass",
+        "decode_loss"
+      ],
+      "boundary": "Path dominance still needs empirical measurement.",
+      "recommended_action": "Gate, ablate, or regularize the bypass branch."
+    },
+    {
+      "finding_id": "finding_congruence",
+      "finding_label": "Train/infer mismatch risk",
+      "severity": "medium",
+      "summary": "The key updater sees different context regimes in training and inference.",
+      "basis": "textual_description",
+      "confidence": "medium",
+      "evidence_refs": [
+        "train_infer_congruence"
+      ],
+      "boundary": "The report does not quantify the mismatch effect.",
+      "recommended_action": "Reduce teacher forcing or simulate infer-time recursion during training."
+    }
+  ],
+  "empirical_only_claims": [
+    {
+      "claim_id": "emp_retrieval_quality",
+      "claim": "The architecture improves retrieval quality on real workloads.",
+      "why_empirical": "This depends on data, training, and benchmark protocol.",
+      "required_evidence": [
+        "benchmark results",
+        "ablation study"
+      ]
+    },
+    {
+      "claim_id": "emp_latency",
+      "claim": "The residual bypass improves serving latency.",
+      "why_empirical": "Latency depends on implementation, hardware, and batch regime.",
+      "required_evidence": [
+        "profiling",
+        "deployment measurements"
+      ]
+    }
+  ]
+}

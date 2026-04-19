@@ -12,6 +12,10 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Felix" }]
 dependencies = []
 
+[project.scripts]
+archer = "ml_archer.cli:main"
+validate-tomography-bundle = "ml_archer.tomography.validate_bundle:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 

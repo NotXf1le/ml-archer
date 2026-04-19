@@ -10,15 +10,22 @@ It focuses on one layer:
 
 ## Quick Start
 
-Use the tomography skill, then validate the bundle:
+If you installed the package, use the console entrypoint:
+
+```bash
+archer tomography validate --bundle-dir <dir>
+```
+
+From a source checkout, the module entrypoint works without installation:
+
+```bash
+python -m ml_archer.cli tomography validate --bundle-dir <dir>
+```
+
+The checkout-friendly script shims also work:
 
 ```bash
 python scripts/archer.py tomography validate --bundle-dir <dir>
-```
-
-You can also call the validator directly:
-
-```bash
 python scripts/validate_tomography_bundle.py --bundle-dir <dir>
 ```
 
@@ -36,6 +43,9 @@ python examples/run_demo_tomography.py --json
 
 ### CLI entrypoints
 
+* `archer`
+* `validate-tomography-bundle`
+* `python -m ml_archer.cli`
 * `scripts/archer.py`
 * `scripts/validate_tomography_bundle.py`
 
